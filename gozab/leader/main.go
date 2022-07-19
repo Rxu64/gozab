@@ -70,7 +70,7 @@ func CallFollowers(clients []pb.SimulationClient) {
 	var lastCount int32 = 0
 
 	for {
-		vec := <-vecBuff // block if empty
+		vec := <-vecBuff // block if empty!
 		proposal := &pb.PropTxn{E: lastEpoch, Transaction: &pb.Txn{V: &pb.Vec{Key: vec.key, Value: vec.value}, Z: &pb.Zxid{Epoch: lastEpoch, Counter: lastCount}}}
 
 		SendProposal(proposal, clients[:])

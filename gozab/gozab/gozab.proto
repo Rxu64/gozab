@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+option go_package = "./";
+
+package gozab;
+
+// the service follower provide to leader
+service Simulation {
+    rpc Broadcast (PropTxn) returns (AckTxn) {}
+    rpc Commit (CommitTxn) returns (Empty) {}
+}
+
+// the service leader provide to user
+service ClientConsole {
+    rpc SendRequest (Vec) returns (Empty) {}
+}
+
+message Vec {
+    string key = 1;
+    int32 value = 2;
+}
+
+message Zxid {
+    int32 epoch = 1;
+    int32 counter = 2;
+}
+
+message Txn {
+    Vec v = 1;
+    Zxid z = 2;
+}
+
+message PropTxn {
+    int32 e = 1;
+    Txn transaction = 2;
+}
+
+message AckTxn {
+    string content = 1;
+}
+
+message CommitTxn {
+    string content = 1;
+}
+
+message Empty {
+    string content = 1;
+}

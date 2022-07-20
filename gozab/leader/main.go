@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"net"
-	"time"
 
 	pb "gozab/gozab"
 
@@ -14,11 +13,6 @@ import (
 
 const serverNum = 4
 
-type Vec struct {
-	key   string
-	value int32
-}
-
 type Ack struct {
 	serial  int32
 	epoch   int32
@@ -26,9 +20,9 @@ type Ack struct {
 }
 
 var (
-	serverPorts   = []string{"", "localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
-	propBuffers   []chan *pb.PropTxn // size 1 queue
-	commitBuffers []chan *pb.CommitTxn
+	serverPorts   = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
+	propBuffers   [4]chan *pb.PropTxn
+	commitBuffers [4]chan *pb.CommitTxn
 	ackBuffer     chan Ack
 	lastEpoch     int32 = 1
 	lastCount     int32 = 0
@@ -41,7 +35,7 @@ type leaderServer struct {
 // implementation of user request handler
 func (s *leaderServer) SendRequest(ctx context.Context, in *pb.Vec) (*pb.Empty, error) {
 	log.Printf("Leader received user request\n")
-	for i := 1; i < serverNum; i++ {
+	for i := 0; i < serverNum; i++ {
 		propBuffers[i] <- &pb.PropTxn{E: lastEpoch, Transaction: &pb.Txn{V: &pb.Vec{Key: in.GetKey(), Value: in.GetValue()}, Z: &pb.Zxid{Epoch: lastEpoch, Counter: lastCount}}}
 	}
 	lastCount++
@@ -53,13 +47,17 @@ func main() {
 		propBuffers[i] = make(chan *pb.PropTxn)
 		commitBuffers[i] = make(chan *pb.CommitTxn)
 	}
+	ackBuffer = make(chan Ack, 4)
 
-	LaunchMessengerRoutines()
+	go MessengerRoutine(serverPorts[0], 0)
+	go MessengerRoutine(serverPorts[1], 1)
+	go MessengerRoutine(serverPorts[2], 2)
+	go MessengerRoutine(serverPorts[3], 3)
 
 	go AckToCommitRoutine() // TODO: finish this!
 
 	// listen user
-	lis, err := net.Listen("tcp", serverPorts[5])
+	lis, err := net.Listen("tcp", serverPorts[4])
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -71,19 +69,11 @@ func main() {
 	}
 }
 
-// simply launch 4 Messenger routines
-func LaunchMessengerRoutines() {
-	for i := 0; i < serverNum; i++ {
-		go MessengerRoutine(serverPorts[i], int32(i))
-	}
-}
-
 func AckToCommitRoutine() {
 	for {
-
 		// Collect acknowledgements
 		ackCount := 0
-		for ackCount <= 2 {
+		for ackCount < serverNum {
 			<-ackBuffer
 			ackCount++
 		}
@@ -97,8 +87,7 @@ func AckToCommitRoutine() {
 
 // CORE BROACAST FUNCTION!
 func MessengerRoutine(port string, serial int32) {
-
-	// Dial the port
+	// dial  follower
 	conn, err := grpc.Dial(serverPorts[serial], grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("did not connect server %s: %v", port, err)
@@ -108,24 +97,23 @@ func MessengerRoutine(port string, serial int32) {
 	client := pb.NewSimulationClient(conn)
 
 	// Coulson: what does this line do?
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
+	// ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	// defer cancel()
 
 	for {
 		// send proposal
 		proposal := <-propBuffers[serial]
-		rb, errb := client.Broadcast(ctx, proposal)
+		rb, errb := client.Broadcast(context.Background(), proposal)
 		if errb != nil {
 			log.Fatalf("could not broadcast to server %s: %v", port, errb)
 		}
-
-		// receive acknowledgement
 		if rb.GetContent() == "I Acknowledged" {
 			ackBuffer <- Ack{serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
 		}
 
+		// send commit
 		commit := <-commitBuffers[serial]
-		rc, errc := client.Commit(ctx, commit)
+		rc, errc := client.Commit(context.Background(), commit)
 		if errc != nil {
 			log.Fatalf("could not issue commit to server %s: %v", port, errc)
 		}

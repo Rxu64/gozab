@@ -19,9 +19,19 @@ type Vec struct {
 	value int32
 }
 
+type Ack struct {
+	serial  int32
+	epoch   int32
+	counter int32
+}
+
 var (
-	serverPorts = []string{"", "localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
-	vecBuff     chan Vec // size 1 queue
+	serverPorts   = []string{"", "localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
+	propBuffers   []chan *pb.PropTxn // size 1 queue
+	commitBuffers []chan *pb.CommitTxn
+	ackBuffer     chan Ack
+	lastEpoch     int32 = 1
+	lastCount     int32 = 0
 )
 
 type leaderServer struct {
@@ -31,26 +41,22 @@ type leaderServer struct {
 // implementation of user request handler
 func (s *leaderServer) SendRequest(ctx context.Context, in *pb.Vec) (*pb.Empty, error) {
 	log.Printf("Leader received user request\n")
-	vecBuff <- Vec{in.GetKey(), in.GetValue()}
+	for i := 1; i < serverNum; i++ {
+		propBuffers[i] <- &pb.PropTxn{E: lastEpoch, Transaction: &pb.Txn{V: &pb.Vec{Key: in.GetKey(), Value: in.GetValue()}, Z: &pb.Zxid{Epoch: lastEpoch, Counter: lastCount}}}
+	}
+	lastCount++
 	return &pb.Empty{Content: "Leader recieved your request"}, nil
 }
 
 func main() {
-	var clients [serverNum + 1]pb.SimulationClient
-	vecBuff = make(chan Vec)
-
-	go CallFollowers(clients[:]) // propose and commit
-
-	// build 4 client connections
-	for i := 1; i <= serverNum; i++ {
-		conn, err := grpc.Dial(serverPorts[i], grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			log.Fatalf("did not connect server%d: %v", i, err)
-		}
-		defer conn.Close()
-		clients[i] = pb.NewSimulationClient(conn)
+	for i := 0; i < serverNum; i++ {
+		propBuffers[i] = make(chan *pb.PropTxn)
+		commitBuffers[i] = make(chan *pb.CommitTxn)
 	}
-	log.Printf("Connection to followers established\n")
+
+	LaunchMessengerRoutines()
+
+	go AckToCommitRoutine() // TODO: finish this!
 
 	// listen user
 	lis, err := net.Listen("tcp", serverPorts[5])
@@ -65,53 +71,66 @@ func main() {
 	}
 }
 
-func CallFollowers(clients []pb.SimulationClient) {
-	var lastEpoch int32 = 1
-	var lastCount int32 = 0
+// simply launch 4 Messenger routines
+func LaunchMessengerRoutines() {
+	for i := 0; i < serverNum; i++ {
+		go MessengerRoutine(serverPorts[i], int32(i))
+	}
+}
+
+func AckToCommitRoutine() {
+	for {
+
+		// Collect acknowledgements
+		ackCount := 0
+		for ackCount <= 2 {
+			<-ackBuffer
+			ackCount++
+		}
+
+		// Tell the Messengers to send commits
+		for i := 0; i < serverNum; i++ {
+			commitBuffers[i] <- &pb.CommitTxn{Content: "Please commit"}
+		}
+	}
+}
+
+// CORE BROACAST FUNCTION!
+func MessengerRoutine(port string, serial int32) {
+
+	// Dial the port
+	conn, err := grpc.Dial(serverPorts[serial], grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("did not connect server %s: %v", port, err)
+	}
+	defer conn.Close()
+
+	client := pb.NewSimulationClient(conn)
+
+	// Coulson: what does this line do?
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
 
 	for {
-		vec := <-vecBuff // block if empty!
-		proposal := &pb.PropTxn{E: lastEpoch, Transaction: &pb.Txn{V: &pb.Vec{Key: vec.key, Value: vec.value}, Z: &pb.Zxid{Epoch: lastEpoch, Counter: lastCount}}}
-
-		SendProposal(proposal, clients[:])
-		lastCount++
-
-		SendCommit(clients[:])
-	}
-}
-
-func SendProposal(proposal *pb.PropTxn, clients []pb.SimulationClient) {
-	akgCount := 0
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	for i := 1; i <= serverNum; i++ {
-		r, err := clients[i].Broadcast(ctx, proposal)
-		if err != nil {
-			log.Fatalf("could not broadcast to server%d: %v", i, err)
+		// send proposal
+		proposal := <-propBuffers[serial]
+		rb, errb := client.Broadcast(ctx, proposal)
+		if errb != nil {
+			log.Fatalf("could not broadcast to server %s: %v", port, errb)
 		}
-		if r.GetContent() == "I Acknowledged" {
-			akgCount++
+
+		// receive acknowledgement
+		if rb.GetContent() == "I Acknowledged" {
+			ackBuffer <- Ack{serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
+		}
+
+		commit := <-commitBuffers[serial]
+		rc, errc := client.Commit(ctx, commit)
+		if errc != nil {
+			log.Fatalf("could not issue commit to server %s: %v", port, errc)
+		}
+		if rc.GetContent() == "Commit message recieved" {
+			log.Printf("Commit feedback recieved from %s", port)
 		}
 	}
-	log.Printf("Result: %d acknowledgement received", akgCount)
-
-}
-
-func SendCommit(clients []pb.SimulationClient) {
-	cmtCount := 0
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	for i := 1; i <= serverNum; i++ {
-		r, err := clients[i].Commit(ctx, &pb.CommitTxn{Content: "Please commit"})
-		if err != nil {
-			log.Fatalf("could not issue commit to server%d: %v", i, err)
-		}
-		if r.GetContent() == "Commit message recieved" {
-			cmtCount++
-		}
-	}
-	log.Printf("Result: %d commit feedback received", cmtCount)
 }

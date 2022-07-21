@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"gozab/follower"
 	"log"
 	"net"
 	"time"
@@ -12,7 +13,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-const serverNum = 4
+const (
+	serverNum = 5
+	userPort  = "localhost:50056"
+)
 
 type Ack struct {
 	serial  int32
@@ -22,11 +26,11 @@ type Ack struct {
 
 var (
 	serverPorts   = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
-	propBuffers   [4]chan *pb.PropTxn
-	commitBuffers [4]chan *pb.CommitTxn
+	propBuffers   [5]chan *pb.PropTxn
+	commitBuffers [5]chan *pb.CommitTxn
 	ackBuffer     chan Ack // size 4 queue
 	activity      chan *pb.Vec
-	upFollowers         = []bool{true, true, true, true}
+	upFollowers         = []bool{true, true, true, true, true}
 	lastEpoch     int32 = 1
 	lastCount     int32 = 0
 )
@@ -53,18 +57,22 @@ func main() {
 		propBuffers[i] = make(chan *pb.PropTxn)
 		commitBuffers[i] = make(chan *pb.CommitTxn)
 	}
-	ackBuffer = make(chan Ack, 4)
+	ackBuffer = make(chan Ack, 5)
 	activity = make(chan *pb.Vec)
+
+	// Launch Routines
+	go follower.FollowerRoutine([]string{"", serverPorts[4]}) // start follower on 50055
 
 	go MessengerRoutine(serverPorts[0], 0)
 	go MessengerRoutine(serverPorts[1], 1)
 	go MessengerRoutine(serverPorts[2], 2)
 	go MessengerRoutine(serverPorts[3], 3)
+	go MessengerRoutine(serverPorts[4], 4)
 
-	go AckToCmtRoutine() // TODO: finish this!
+	go AckToCmtRoutine()
 
 	// listen user
-	lis, err := net.Listen("tcp", serverPorts[4])
+	lis, err := net.Listen("tcp", userPort)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -79,7 +87,7 @@ func main() {
 func AckToCmtRoutine() {
 	upNum := serverNum
 	const timeout = time.Second
-	ackFollowers := make([]bool, 4)
+	ackFollowers := make([]bool, 5)
 	for {
 		// Collect acknowledgements with timeout
 		<-activity     // wait for user activity

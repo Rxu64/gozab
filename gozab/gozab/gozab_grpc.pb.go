@@ -24,6 +24,7 @@ const _ = grpc.SupportPackageIsVersion7
 type SimulationClient interface {
 	Broadcast(ctx context.Context, in *PropTxn, opts ...grpc.CallOption) (*AckTxn, error)
 	Commit(ctx context.Context, in *CommitTxn, opts ...grpc.CallOption) (*Empty, error)
+	Retrieve(ctx context.Context, in *GetTxn, opts ...grpc.CallOption) (*ResultTxn, error)
 }
 
 type simulationClient struct {
@@ -52,12 +53,22 @@ func (c *simulationClient) Commit(ctx context.Context, in *CommitTxn, opts ...gr
 	return out, nil
 }
 
+func (c *simulationClient) Retrieve(ctx context.Context, in *GetTxn, opts ...grpc.CallOption) (*ResultTxn, error) {
+	out := new(ResultTxn)
+	err := c.cc.Invoke(ctx, "/gozab.Simulation/Retrieve", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SimulationServer is the server API for Simulation service.
 // All implementations must embed UnimplementedSimulationServer
 // for forward compatibility
 type SimulationServer interface {
 	Broadcast(context.Context, *PropTxn) (*AckTxn, error)
 	Commit(context.Context, *CommitTxn) (*Empty, error)
+	Retrieve(context.Context, *GetTxn) (*ResultTxn, error)
 	mustEmbedUnimplementedSimulationServer()
 }
 
@@ -70,6 +81,9 @@ func (UnimplementedSimulationServer) Broadcast(context.Context, *PropTxn) (*AckT
 }
 func (UnimplementedSimulationServer) Commit(context.Context, *CommitTxn) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Commit not implemented")
+}
+func (UnimplementedSimulationServer) Retrieve(context.Context, *GetTxn) (*ResultTxn, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Retrieve not implemented")
 }
 func (UnimplementedSimulationServer) mustEmbedUnimplementedSimulationServer() {}
 
@@ -120,6 +134,24 @@ func _Simulation_Commit_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Simulation_Retrieve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTxn)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SimulationServer).Retrieve(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gozab.Simulation/Retrieve",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SimulationServer).Retrieve(ctx, req.(*GetTxn))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Simulation_ServiceDesc is the grpc.ServiceDesc for Simulation service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -135,6 +167,10 @@ var Simulation_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Commit",
 			Handler:    _Simulation_Commit_Handler,
 		},
+		{
+			MethodName: "Retrieve",
+			Handler:    _Simulation_Retrieve_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "gozab.proto",
@@ -145,6 +181,7 @@ var Simulation_ServiceDesc = grpc.ServiceDesc{
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ClientConsoleClient interface {
 	SendRequest(ctx context.Context, in *Vec, opts ...grpc.CallOption) (*Empty, error)
+	Retrieve(ctx context.Context, in *GetTxn, opts ...grpc.CallOption) (*ResultTxn, error)
 }
 
 type clientConsoleClient struct {
@@ -164,11 +201,21 @@ func (c *clientConsoleClient) SendRequest(ctx context.Context, in *Vec, opts ...
 	return out, nil
 }
 
+func (c *clientConsoleClient) Retrieve(ctx context.Context, in *GetTxn, opts ...grpc.CallOption) (*ResultTxn, error) {
+	out := new(ResultTxn)
+	err := c.cc.Invoke(ctx, "/gozab.ClientConsole/Retrieve", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ClientConsoleServer is the server API for ClientConsole service.
 // All implementations must embed UnimplementedClientConsoleServer
 // for forward compatibility
 type ClientConsoleServer interface {
 	SendRequest(context.Context, *Vec) (*Empty, error)
+	Retrieve(context.Context, *GetTxn) (*ResultTxn, error)
 	mustEmbedUnimplementedClientConsoleServer()
 }
 
@@ -178,6 +225,9 @@ type UnimplementedClientConsoleServer struct {
 
 func (UnimplementedClientConsoleServer) SendRequest(context.Context, *Vec) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendRequest not implemented")
+}
+func (UnimplementedClientConsoleServer) Retrieve(context.Context, *GetTxn) (*ResultTxn, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Retrieve not implemented")
 }
 func (UnimplementedClientConsoleServer) mustEmbedUnimplementedClientConsoleServer() {}
 
@@ -210,6 +260,24 @@ func _ClientConsole_SendRequest_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ClientConsole_Retrieve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTxn)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClientConsoleServer).Retrieve(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gozab.ClientConsole/Retrieve",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClientConsoleServer).Retrieve(ctx, req.(*GetTxn))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ClientConsole_ServiceDesc is the grpc.ServiceDesc for ClientConsole service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -220,6 +288,10 @@ var ClientConsole_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SendRequest",
 			Handler:    _ClientConsole_SendRequest_Handler,
+		},
+		{
+			MethodName: "Retrieve",
+			Handler:    _ClientConsole_Retrieve_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

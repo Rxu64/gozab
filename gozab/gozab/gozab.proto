@@ -8,11 +8,13 @@ package gozab;
 service Simulation {
     rpc Broadcast (PropTxn) returns (AckTxn) {}
     rpc Commit (CommitTxn) returns (Empty) {}
+    rpc Retrieve (GetTxn) returns (ResultTxn) {}
 }
 
 // the service leader provide to user
 service ClientConsole {
     rpc SendRequest (Vec) returns (Empty) {}
+    rpc Retrieve (GetTxn) returns (ResultTxn) {}
 }
 
 message Vec {
@@ -41,6 +43,14 @@ message AckTxn {
 
 message CommitTxn {
     string content = 1;
+}
+
+message GetTxn {
+    string key = 1;
+}
+
+message ResultTxn {
+    int32 value = 1;
 }
 
 message Empty {

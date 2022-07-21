@@ -39,7 +39,7 @@ type leaderServer struct {
 	pb.UnimplementedClientConsoleServer
 }
 
-// implementation of user request handler
+// implementation of user Send request handler
 func (s *leaderServer) SendRequest(ctx context.Context, in *pb.Vec) (*pb.Empty, error) {
 	log.Printf("Leader received user request\n")
 	activity <- in

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"time"
 
 	pb "gozab/gozab"
 
@@ -23,7 +24,9 @@ var (
 	serverPorts   = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
 	propBuffers   [4]chan *pb.PropTxn
 	commitBuffers [4]chan *pb.CommitTxn
-	ackBuffer     chan Ack
+	ackBuffer     chan Ack // size 4 queue
+	activity      chan *pb.Vec
+	upFollowers         = []bool{true, true, true, true}
 	lastEpoch     int32 = 1
 	lastCount     int32 = 0
 )
@@ -35,8 +38,11 @@ type leaderServer struct {
 // implementation of user request handler
 func (s *leaderServer) SendRequest(ctx context.Context, in *pb.Vec) (*pb.Empty, error) {
 	log.Printf("Leader received user request\n")
-	for i := 0; i < serverNum; i++ {
-		propBuffers[i] <- &pb.PropTxn{E: lastEpoch, Transaction: &pb.Txn{V: &pb.Vec{Key: in.GetKey(), Value: in.GetValue()}, Z: &pb.Zxid{Epoch: lastEpoch, Counter: lastCount}}}
+	activity <- in
+	for i, up := range upFollowers {
+		if up {
+			propBuffers[i] <- &pb.PropTxn{E: lastEpoch, Transaction: &pb.Txn{V: &pb.Vec{Key: in.GetKey(), Value: in.GetValue()}, Z: &pb.Zxid{Epoch: lastEpoch, Counter: lastCount}}}
+		}
 	}
 	lastCount++
 	return &pb.Empty{Content: "Leader recieved your request"}, nil
@@ -48,13 +54,14 @@ func main() {
 		commitBuffers[i] = make(chan *pb.CommitTxn)
 	}
 	ackBuffer = make(chan Ack, 4)
+	activity = make(chan *pb.Vec)
 
 	go MessengerRoutine(serverPorts[0], 0)
 	go MessengerRoutine(serverPorts[1], 1)
 	go MessengerRoutine(serverPorts[2], 2)
 	go MessengerRoutine(serverPorts[3], 3)
 
-	go AckToCommitRoutine() // TODO: finish this!
+	go AckToCmtRoutine() // TODO: finish this!
 
 	// listen user
 	lis, err := net.Listen("tcp", serverPorts[4])
@@ -69,43 +76,65 @@ func main() {
 	}
 }
 
-func AckToCommitRoutine() {
+func AckToCmtRoutine() {
+	upNum := serverNum
+	const timeout = time.Second
+	ackFollowers := make([]bool, 4)
 	for {
-		// Collect acknowledgements
-		ackCount := 0
-		for ackCount < serverNum {
-			<-ackBuffer
-			ackCount++
+		// Collect acknowledgements with timeout
+		<-activity     // wait for user activity
+		downCount := 0 // reset count
+		for i := range ackFollowers {
+			ackFollowers[i] = false // reset marker
 		}
 
-		// Tell the Messengers to send commits
-		for i := 0; i < serverNum; i++ {
-			commitBuffers[i] <- &pb.CommitTxn{Content: "Please commit"}
+		for i := 0; i < upNum; i++ {
+			select {
+			case ack := <-ackBuffer:
+				ackFollowers[ack.serial] = true // mark this follower as acknowledged
+			case <-time.After(timeout):
+				downCount++
+				continue
+			}
+		}
+
+		for i, acknowledged := range ackFollowers {
+			if !acknowledged {
+				upFollowers[i] = false // mark followers who did not acknowledge as down
+			}
+		}
+
+		upNum -= downCount
+		if upNum < 2 {
+			log.Fatalf("quorum dead")
+		}
+
+		// Tell the acknowledged Messengers to send commits
+		for i, acked := range upFollowers {
+			if acked {
+				commitBuffers[i] <- &pb.CommitTxn{Content: "Please commit"}
+			}
 		}
 	}
 }
 
 // CORE BROACAST FUNCTION!
 func MessengerRoutine(port string, serial int32) {
-	// dial  follower
+	// dial follower
 	conn, err := grpc.Dial(serverPorts[serial], grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Fatalf("did not connect server %s: %v", port, err)
+		log.Printf("did not connect server %s: %v", port, err)
 	}
 	defer conn.Close()
 
 	client := pb.NewSimulationClient(conn)
 
-	// Coulson: what does this line do?
-	// ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	// defer cancel()
-
 	for {
 		// send proposal
-		proposal := <-propBuffers[serial]
+		proposal := <-propBuffers[serial] // should add timeout
 		rb, errb := client.Broadcast(context.Background(), proposal)
 		if errb != nil {
-			log.Fatalf("could not broadcast to server %s: %v", port, errb)
+			log.Printf("could not broadcast to server %s: %v", port, errb)
 		}
 		if rb.GetContent() == "I Acknowledged" {
 			ackBuffer <- Ack{serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
@@ -115,7 +144,7 @@ func MessengerRoutine(port string, serial int32) {
 		commit := <-commitBuffers[serial]
 		rc, errc := client.Commit(context.Background(), commit)
 		if errc != nil {
-			log.Fatalf("could not issue commit to server %s: %v", port, errc)
+			log.Printf("could not issue commit to server %s: %v", port, errc)
 		}
 		if rc.GetContent() == "Commit message recieved" {
 			log.Printf("Commit feedback recieved from %s", port)

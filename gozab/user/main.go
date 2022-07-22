@@ -17,26 +17,24 @@ func main() {
 		log.Fatalf("did not connect to leader: %v", err)
 	}
 	defer conn.Close()
-	c := pb.NewClientConsoleClient(conn)
+	c := pb.NewLeaderUserClient(conn)
 
+	var key string
+	var val int32
+	var command string
 	// stdin key value
 	for {
-		var key string
-		var val int32
-		var command string
-
 		fmt.Printf("Enter 'Send' or 'Get' (^C to quit): ")
 		fmt.Scanf("%s", &command)
 
 		if command == "Send" {
 			fmt.Printf("Enter key-value pair: ")
 			fmt.Scanf("%s %d", &key, &val)
-			r, err := c.SendRequest(context.Background(), &pb.Vec{Key: key, Value: val})
+			r, err := c.Store(context.Background(), &pb.Vec{Key: key, Value: val})
 			if err != nil {
 				log.Fatalf("could not send request to leader: %v", err)
 			}
 			log.Printf("Greeting: %s", r.GetContent())
-
 		} else if command == "Get" {
 			fmt.Printf("Enter a key: ")
 			fmt.Scanf("%s", &key)

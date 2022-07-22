@@ -18,280 +18,244 @@ import (
 // Requires gRPC-Go v1.32.0 or later.
 const _ = grpc.SupportPackageIsVersion7
 
-// SimulationClient is the client API for Simulation service.
+// FollowerLeaderClient is the client API for FollowerLeader service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type SimulationClient interface {
+type FollowerLeaderClient interface {
 	Broadcast(ctx context.Context, in *PropTxn, opts ...grpc.CallOption) (*AckTxn, error)
 	Commit(ctx context.Context, in *CommitTxn, opts ...grpc.CallOption) (*Empty, error)
-	Retrieve(ctx context.Context, in *GetTxn, opts ...grpc.CallOption) (*ResultTxn, error)
 }
 
-type simulationClient struct {
+type followerLeaderClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewSimulationClient(cc grpc.ClientConnInterface) SimulationClient {
-	return &simulationClient{cc}
+func NewFollowerLeaderClient(cc grpc.ClientConnInterface) FollowerLeaderClient {
+	return &followerLeaderClient{cc}
 }
 
-func (c *simulationClient) Broadcast(ctx context.Context, in *PropTxn, opts ...grpc.CallOption) (*AckTxn, error) {
+func (c *followerLeaderClient) Broadcast(ctx context.Context, in *PropTxn, opts ...grpc.CallOption) (*AckTxn, error) {
 	out := new(AckTxn)
-	err := c.cc.Invoke(ctx, "/gozab.Simulation/Broadcast", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/gozab.FollowerLeader/Broadcast", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *simulationClient) Commit(ctx context.Context, in *CommitTxn, opts ...grpc.CallOption) (*Empty, error) {
+func (c *followerLeaderClient) Commit(ctx context.Context, in *CommitTxn, opts ...grpc.CallOption) (*Empty, error) {
 	out := new(Empty)
-	err := c.cc.Invoke(ctx, "/gozab.Simulation/Commit", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/gozab.FollowerLeader/Commit", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *simulationClient) Retrieve(ctx context.Context, in *GetTxn, opts ...grpc.CallOption) (*ResultTxn, error) {
-	out := new(ResultTxn)
-	err := c.cc.Invoke(ctx, "/gozab.Simulation/Retrieve", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// SimulationServer is the server API for Simulation service.
-// All implementations must embed UnimplementedSimulationServer
+// FollowerLeaderServer is the server API for FollowerLeader service.
+// All implementations must embed UnimplementedFollowerLeaderServer
 // for forward compatibility
-type SimulationServer interface {
+type FollowerLeaderServer interface {
 	Broadcast(context.Context, *PropTxn) (*AckTxn, error)
 	Commit(context.Context, *CommitTxn) (*Empty, error)
-	Retrieve(context.Context, *GetTxn) (*ResultTxn, error)
-	mustEmbedUnimplementedSimulationServer()
+	mustEmbedUnimplementedFollowerLeaderServer()
 }
 
-// UnimplementedSimulationServer must be embedded to have forward compatible implementations.
-type UnimplementedSimulationServer struct {
+// UnimplementedFollowerLeaderServer must be embedded to have forward compatible implementations.
+type UnimplementedFollowerLeaderServer struct {
 }
 
-func (UnimplementedSimulationServer) Broadcast(context.Context, *PropTxn) (*AckTxn, error) {
+func (UnimplementedFollowerLeaderServer) Broadcast(context.Context, *PropTxn) (*AckTxn, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Broadcast not implemented")
 }
-func (UnimplementedSimulationServer) Commit(context.Context, *CommitTxn) (*Empty, error) {
+func (UnimplementedFollowerLeaderServer) Commit(context.Context, *CommitTxn) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Commit not implemented")
 }
-func (UnimplementedSimulationServer) Retrieve(context.Context, *GetTxn) (*ResultTxn, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Retrieve not implemented")
-}
-func (UnimplementedSimulationServer) mustEmbedUnimplementedSimulationServer() {}
+func (UnimplementedFollowerLeaderServer) mustEmbedUnimplementedFollowerLeaderServer() {}
 
-// UnsafeSimulationServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to SimulationServer will
+// UnsafeFollowerLeaderServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to FollowerLeaderServer will
 // result in compilation errors.
-type UnsafeSimulationServer interface {
-	mustEmbedUnimplementedSimulationServer()
+type UnsafeFollowerLeaderServer interface {
+	mustEmbedUnimplementedFollowerLeaderServer()
 }
 
-func RegisterSimulationServer(s grpc.ServiceRegistrar, srv SimulationServer) {
-	s.RegisterService(&Simulation_ServiceDesc, srv)
+func RegisterFollowerLeaderServer(s grpc.ServiceRegistrar, srv FollowerLeaderServer) {
+	s.RegisterService(&FollowerLeader_ServiceDesc, srv)
 }
 
-func _Simulation_Broadcast_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _FollowerLeader_Broadcast_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PropTxn)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SimulationServer).Broadcast(ctx, in)
+		return srv.(FollowerLeaderServer).Broadcast(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/gozab.Simulation/Broadcast",
+		FullMethod: "/gozab.FollowerLeader/Broadcast",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SimulationServer).Broadcast(ctx, req.(*PropTxn))
+		return srv.(FollowerLeaderServer).Broadcast(ctx, req.(*PropTxn))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Simulation_Commit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _FollowerLeader_Commit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CommitTxn)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SimulationServer).Commit(ctx, in)
+		return srv.(FollowerLeaderServer).Commit(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/gozab.Simulation/Commit",
+		FullMethod: "/gozab.FollowerLeader/Commit",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SimulationServer).Commit(ctx, req.(*CommitTxn))
+		return srv.(FollowerLeaderServer).Commit(ctx, req.(*CommitTxn))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Simulation_Retrieve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetTxn)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(SimulationServer).Retrieve(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gozab.Simulation/Retrieve",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SimulationServer).Retrieve(ctx, req.(*GetTxn))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-// Simulation_ServiceDesc is the grpc.ServiceDesc for Simulation service.
+// FollowerLeader_ServiceDesc is the grpc.ServiceDesc for FollowerLeader service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var Simulation_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "gozab.Simulation",
-	HandlerType: (*SimulationServer)(nil),
+var FollowerLeader_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "gozab.FollowerLeader",
+	HandlerType: (*FollowerLeaderServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "Broadcast",
-			Handler:    _Simulation_Broadcast_Handler,
+			Handler:    _FollowerLeader_Broadcast_Handler,
 		},
 		{
 			MethodName: "Commit",
-			Handler:    _Simulation_Commit_Handler,
-		},
-		{
-			MethodName: "Retrieve",
-			Handler:    _Simulation_Retrieve_Handler,
+			Handler:    _FollowerLeader_Commit_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "gozab.proto",
 }
 
-// ClientConsoleClient is the client API for ClientConsole service.
+// LeaderUserClient is the client API for LeaderUser service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type ClientConsoleClient interface {
-	SendRequest(ctx context.Context, in *Vec, opts ...grpc.CallOption) (*Empty, error)
+type LeaderUserClient interface {
+	Store(ctx context.Context, in *Vec, opts ...grpc.CallOption) (*Empty, error)
 	Retrieve(ctx context.Context, in *GetTxn, opts ...grpc.CallOption) (*ResultTxn, error)
 }
 
-type clientConsoleClient struct {
+type leaderUserClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewClientConsoleClient(cc grpc.ClientConnInterface) ClientConsoleClient {
-	return &clientConsoleClient{cc}
+func NewLeaderUserClient(cc grpc.ClientConnInterface) LeaderUserClient {
+	return &leaderUserClient{cc}
 }
 
-func (c *clientConsoleClient) SendRequest(ctx context.Context, in *Vec, opts ...grpc.CallOption) (*Empty, error) {
+func (c *leaderUserClient) Store(ctx context.Context, in *Vec, opts ...grpc.CallOption) (*Empty, error) {
 	out := new(Empty)
-	err := c.cc.Invoke(ctx, "/gozab.ClientConsole/SendRequest", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/gozab.LeaderUser/Store", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *clientConsoleClient) Retrieve(ctx context.Context, in *GetTxn, opts ...grpc.CallOption) (*ResultTxn, error) {
+func (c *leaderUserClient) Retrieve(ctx context.Context, in *GetTxn, opts ...grpc.CallOption) (*ResultTxn, error) {
 	out := new(ResultTxn)
-	err := c.cc.Invoke(ctx, "/gozab.ClientConsole/Retrieve", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/gozab.LeaderUser/Retrieve", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// ClientConsoleServer is the server API for ClientConsole service.
-// All implementations must embed UnimplementedClientConsoleServer
+// LeaderUserServer is the server API for LeaderUser service.
+// All implementations must embed UnimplementedLeaderUserServer
 // for forward compatibility
-type ClientConsoleServer interface {
-	SendRequest(context.Context, *Vec) (*Empty, error)
+type LeaderUserServer interface {
+	Store(context.Context, *Vec) (*Empty, error)
 	Retrieve(context.Context, *GetTxn) (*ResultTxn, error)
-	mustEmbedUnimplementedClientConsoleServer()
+	mustEmbedUnimplementedLeaderUserServer()
 }
 
-// UnimplementedClientConsoleServer must be embedded to have forward compatible implementations.
-type UnimplementedClientConsoleServer struct {
+// UnimplementedLeaderUserServer must be embedded to have forward compatible implementations.
+type UnimplementedLeaderUserServer struct {
 }
 
-func (UnimplementedClientConsoleServer) SendRequest(context.Context, *Vec) (*Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SendRequest not implemented")
+func (UnimplementedLeaderUserServer) Store(context.Context, *Vec) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Store not implemented")
 }
-func (UnimplementedClientConsoleServer) Retrieve(context.Context, *GetTxn) (*ResultTxn, error) {
+func (UnimplementedLeaderUserServer) Retrieve(context.Context, *GetTxn) (*ResultTxn, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Retrieve not implemented")
 }
-func (UnimplementedClientConsoleServer) mustEmbedUnimplementedClientConsoleServer() {}
+func (UnimplementedLeaderUserServer) mustEmbedUnimplementedLeaderUserServer() {}
 
-// UnsafeClientConsoleServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to ClientConsoleServer will
+// UnsafeLeaderUserServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to LeaderUserServer will
 // result in compilation errors.
-type UnsafeClientConsoleServer interface {
-	mustEmbedUnimplementedClientConsoleServer()
+type UnsafeLeaderUserServer interface {
+	mustEmbedUnimplementedLeaderUserServer()
 }
 
-func RegisterClientConsoleServer(s grpc.ServiceRegistrar, srv ClientConsoleServer) {
-	s.RegisterService(&ClientConsole_ServiceDesc, srv)
+func RegisterLeaderUserServer(s grpc.ServiceRegistrar, srv LeaderUserServer) {
+	s.RegisterService(&LeaderUser_ServiceDesc, srv)
 }
 
-func _ClientConsole_SendRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _LeaderUser_Store_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(Vec)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ClientConsoleServer).SendRequest(ctx, in)
+		return srv.(LeaderUserServer).Store(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/gozab.ClientConsole/SendRequest",
+		FullMethod: "/gozab.LeaderUser/Store",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ClientConsoleServer).SendRequest(ctx, req.(*Vec))
+		return srv.(LeaderUserServer).Store(ctx, req.(*Vec))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ClientConsole_Retrieve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _LeaderUser_Retrieve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetTxn)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ClientConsoleServer).Retrieve(ctx, in)
+		return srv.(LeaderUserServer).Retrieve(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/gozab.ClientConsole/Retrieve",
+		FullMethod: "/gozab.LeaderUser/Retrieve",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ClientConsoleServer).Retrieve(ctx, req.(*GetTxn))
+		return srv.(LeaderUserServer).Retrieve(ctx, req.(*GetTxn))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// ClientConsole_ServiceDesc is the grpc.ServiceDesc for ClientConsole service.
+// LeaderUser_ServiceDesc is the grpc.ServiceDesc for LeaderUser service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var ClientConsole_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "gozab.ClientConsole",
-	HandlerType: (*ClientConsoleServer)(nil),
+var LeaderUser_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "gozab.LeaderUser",
+	HandlerType: (*LeaderUserServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "SendRequest",
-			Handler:    _ClientConsole_SendRequest_Handler,
+			MethodName: "Store",
+			Handler:    _LeaderUser_Store_Handler,
 		},
 		{
 			MethodName: "Retrieve",
-			Handler:    _ClientConsole_Retrieve_Handler,
+			Handler:    _LeaderUser_Retrieve_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -5,15 +5,14 @@ option go_package = "./";
 package gozab;
 
 // the service follower provide to leader
-service Simulation {
+service FollowerLeader {
     rpc Broadcast (PropTxn) returns (AckTxn) {}
     rpc Commit (CommitTxn) returns (Empty) {}
-    rpc Retrieve (GetTxn) returns (ResultTxn) {}
 }
 
 // the service leader provide to user
-service ClientConsole {
-    rpc SendRequest (Vec) returns (Empty) {}
+service LeaderUser {
+    rpc Store (Vec) returns (Empty) {}
     rpc Retrieve (GetTxn) returns (ResultTxn) {}
 }
 

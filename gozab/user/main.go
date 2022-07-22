@@ -19,31 +19,24 @@ func main() {
 	defer conn.Close()
 	c := pb.NewClientConsoleClient(conn)
 
-	//ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	//defer cancel()
-
 	// stdin key value
 	for {
 		var key string
 		var val int32
 		var command string
 
-		fmt.Printf("Enter 'Send' or 'Get': ")
+		fmt.Printf("Enter 'Send' or 'Get' (^C to quit): ")
 		fmt.Scanf("%s", &command)
 
 		if command == "Send" {
-			safe := 0
 			fmt.Printf("Enter key-value pair: ")
 			fmt.Scanf("%s %d", &key, &val)
-			safe = 1
-			if safe == 1 {
-				r, err := c.SendRequest(context.Background(), &pb.Vec{Key: key, Value: val})
-				if err != nil {
-					log.Fatalf("could not send request to leader: %v", err)
-				}
-				log.Printf("Greeting: %s", r.GetContent())
-				safe = 0
+			r, err := c.SendRequest(context.Background(), &pb.Vec{Key: key, Value: val})
+			if err != nil {
+				log.Fatalf("could not send request to leader: %v", err)
 			}
+			log.Printf("Greeting: %s", r.GetContent())
+
 		} else if command == "Get" {
 			fmt.Printf("Enter a key: ")
 			fmt.Scanf("%s", &key)
@@ -52,6 +45,8 @@ func main() {
 				log.Fatalf("could not send Get request to leader: %v", err)
 			}
 			log.Printf("Greeting: %d", r.GetValue())
+		} else {
+			continue
 		}
 	}
 }

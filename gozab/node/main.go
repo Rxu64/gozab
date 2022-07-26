@@ -83,10 +83,8 @@ func main() {
 // Leader: implementation of user Store handler
 func (s *leaderServer) Store(ctx context.Context, in *pb.Vec) (*pb.Empty, error) {
 	log.Printf("Leader received user request\n")
-	for i, up := range upFollowers {
-		if up {
-			propBuffers[i] <- &pb.PropTxn{E: lastEpoch, Transaction: &pb.Txn{V: &pb.Vec{Key: in.GetKey(), Value: in.GetValue()}, Z: &pb.Zxid{Epoch: lastEpoch, Counter: lastCount}}}
-		}
+	for i := 0; i < serverNum; i++ {
+		propBuffers[i] <- &pb.PropTxn{E: lastEpoch, Transaction: &pb.Txn{V: &pb.Vec{Key: in.GetKey(), Value: in.GetValue()}, Z: &pb.Zxid{Epoch: lastEpoch, Counter: lastCount}}}
 	}
 	lastCount++
 	return &pb.Empty{Content: "Leader recieved your request"}, nil
@@ -170,7 +168,7 @@ func AckToCmtRoutine() {
 		// Update upFollowers statistics
 		for i := 0; i < serverNum; i++ {
 			ack := <-ackBuffer
-			if !ack.valid {
+			if !ack.valid && upFollowers[ack.serial] {
 				upFollowers[ack.serial] = false
 				upNum--
 			}
@@ -206,8 +204,8 @@ func MessengerRoutine(port string, serial int32) {
 		proposal := <-propBuffers[serial]
 		clientDeadline := time.Now().Add(time.Duration(time.Second)) // 1 second deadline
 		ctx, cancel := context.WithDeadline(context.Background(), clientDeadline)
-		defer cancel()
 		rb, errb := client.Broadcast(ctx, proposal)
+		cancel() // defer?
 		if errb != nil {
 			log.Printf("could not broadcast to server %s: %v", port, errb)
 			status, ok := status.FromError(err)

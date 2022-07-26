@@ -10,7 +10,9 @@ import (
 	pb "gozab/gozab"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -39,6 +41,7 @@ type Proposal struct {
 }
 
 type Ack struct {
+	valid   bool
 	serial  int32
 	epoch   int32
 	counter int32
@@ -49,10 +52,9 @@ var (
 	propBuffers   [5]chan *pb.PropTxn
 	commitBuffers [5]chan *pb.CommitTxn
 	ackBuffer     chan Ack // size 5 queue
-	activity      chan *pb.Vec
-	upFollowers         = []bool{true, true, true, true, true}
-	lastEpoch     int32 = 1
-	lastCount     int32 = 0
+	upFollowers            = []bool{true, true, true, true, true}
+	lastEpoch     int32    = 1
+	lastCount     int32    = 0
 
 	pStorage []Proposal
 	dStruct  map[string]int32
@@ -81,7 +83,6 @@ func main() {
 // Leader: implementation of user Store handler
 func (s *leaderServer) Store(ctx context.Context, in *pb.Vec) (*pb.Empty, error) {
 	log.Printf("Leader received user request\n")
-	activity <- in
 	for i, up := range upFollowers {
 		if up {
 			propBuffers[i] <- &pb.PropTxn{E: lastEpoch, Transaction: &pb.Txn{V: &pb.Vec{Key: in.GetKey(), Value: in.GetValue()}, Z: &pb.Zxid{Epoch: lastEpoch, Counter: lastCount}}}
@@ -103,7 +104,6 @@ func LeaderRoutine(port string) {
 		commitBuffers[i] = make(chan *pb.CommitTxn)
 	}
 	ackBuffer = make(chan Ack, 5)
-	activity = make(chan *pb.Vec)
 
 	go FollowerRoutine(port)
 
@@ -165,36 +165,18 @@ func FollowerRoutine(port string) {
 
 func AckToCmtRoutine() {
 	upNum := serverNum
-	const timeout = time.Second
-	ackFollowers := make([]bool, 5)
 	for {
-		<-activity     // wait for user activity
-		downCount := 0 // reset count
-		for i := range ackFollowers {
-			ackFollowers[i] = false // reset marker
-		}
-
-		// Collect acknowledgements with timeout
-		for i := 0; i < upNum; i++ {
-			select {
-			case ack := <-ackBuffer:
-				ackFollowers[ack.serial] = true // mark this follower as acknowledged
-			case <-time.After(timeout):
-				log.Printf("Should not appear")
-				downCount++ // some follower down
-			}
-		}
-
-		// Mark the followers who did not acknowledge as down
-		for i, acknowledged := range ackFollowers {
-			if !acknowledged {
-				upFollowers[i] = false
-				log.Printf("#%d down", i)
+		// Collect acknowledgements from Messengers
+		// Update upFollowers statistics
+		for i := 0; i < serverNum; i++ {
+			ack := <-ackBuffer
+			if !ack.valid {
+				upFollowers[ack.serial] = false
+				upNum--
 			}
 		}
 
 		// Check if quorum dead
-		upNum -= downCount
 		if upNum <= serverNum/2 {
 			log.Fatalf("quorum dead")
 		}
@@ -222,12 +204,28 @@ func MessengerRoutine(port string, serial int32) {
 	for {
 		// send proposal
 		proposal := <-propBuffers[serial]
-		rb, errb := client.Broadcast(context.Background(), proposal)
+		clientDeadline := time.Now().Add(time.Duration(time.Second)) // 1 second deadline
+		ctx, cancel := context.WithDeadline(context.Background(), clientDeadline)
+		defer cancel()
+		rb, errb := client.Broadcast(ctx, proposal)
 		if errb != nil {
 			log.Printf("could not broadcast to server %s: %v", port, errb)
+			status, ok := status.FromError(err)
+			if ok {
+				if status.Code() == codes.DeadlineExceeded {
+					log.Printf("Server %s timeout, Messenger exit", port)
+				}
+			}
+			// dead Messenger
+			log.Printf("messenger on %s initiated death mode", port)
+			ackBuffer <- Ack{false, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
+			for {
+				proposal = <-propBuffers[serial]
+				ackBuffer <- Ack{false, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
+			}
 		}
 		if rb.GetContent() == "I Acknowledged" {
-			ackBuffer <- Ack{serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
+			ackBuffer <- Ack{true, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
 		}
 
 		// send commit

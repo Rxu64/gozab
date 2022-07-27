@@ -24,6 +24,7 @@ const _ = grpc.SupportPackageIsVersion7
 type FollowerLeaderClient interface {
 	Broadcast(ctx context.Context, in *PropTxn, opts ...grpc.CallOption) (*AckTxn, error)
 	Commit(ctx context.Context, in *CommitTxn, opts ...grpc.CallOption) (*Empty, error)
+	HeartBeat(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
 }
 
 type followerLeaderClient struct {
@@ -52,12 +53,22 @@ func (c *followerLeaderClient) Commit(ctx context.Context, in *CommitTxn, opts .
 	return out, nil
 }
 
+func (c *followerLeaderClient) HeartBeat(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error) {
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, "/gozab.FollowerLeader/HeartBeat", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // FollowerLeaderServer is the server API for FollowerLeader service.
 // All implementations must embed UnimplementedFollowerLeaderServer
 // for forward compatibility
 type FollowerLeaderServer interface {
 	Broadcast(context.Context, *PropTxn) (*AckTxn, error)
 	Commit(context.Context, *CommitTxn) (*Empty, error)
+	HeartBeat(context.Context, *Empty) (*Empty, error)
 	mustEmbedUnimplementedFollowerLeaderServer()
 }
 
@@ -70,6 +81,9 @@ func (UnimplementedFollowerLeaderServer) Broadcast(context.Context, *PropTxn) (*
 }
 func (UnimplementedFollowerLeaderServer) Commit(context.Context, *CommitTxn) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Commit not implemented")
+}
+func (UnimplementedFollowerLeaderServer) HeartBeat(context.Context, *Empty) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HeartBeat not implemented")
 }
 func (UnimplementedFollowerLeaderServer) mustEmbedUnimplementedFollowerLeaderServer() {}
 
@@ -120,6 +134,24 @@ func _FollowerLeader_Commit_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _FollowerLeader_HeartBeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FollowerLeaderServer).HeartBeat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gozab.FollowerLeader/HeartBeat",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FollowerLeaderServer).HeartBeat(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // FollowerLeader_ServiceDesc is the grpc.ServiceDesc for FollowerLeader service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -134,6 +166,10 @@ var FollowerLeader_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Commit",
 			Handler:    _FollowerLeader_Commit_Handler,
+		},
+		{
+			MethodName: "HeartBeat",
+			Handler:    _FollowerLeader_HeartBeat_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

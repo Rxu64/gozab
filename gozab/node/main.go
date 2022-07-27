@@ -145,6 +145,11 @@ func (s *followerServer) Commit(ctx context.Context, in *pb.CommitTxn) (*pb.Empt
 	return &pb.Empty{Content: "Commit message recieved"}, nil
 }
 
+// Follower: implementation of HeartBeat handler
+func (s *followerServer) HeartBeat(ctx context.Context, in *pb.Empty) (*pb.Empty, error) {
+	return &pb.Empty{Content: "bump"}, nil
+}
+
 func FollowerRoutine(port string) {
 	// listen on port
 	lis, err := net.Listen("tcp", port)
@@ -199,41 +204,67 @@ func MessengerRoutine(port string, serial int32) {
 
 	client := pb.NewFollowerLeaderClient(conn)
 
+	death := make(chan string)
+	go HeartBeatRoutine(client, death)
+
 	for {
 		// send proposal
-		proposal := <-propBuffers[serial]
-		clientDeadline := time.Now().Add(time.Duration(time.Second)) // 1 second deadline
-		ctx, cancel := context.WithDeadline(context.Background(), clientDeadline)
-		rb, errb := client.Broadcast(ctx, proposal)
-		cancel() // defer?
-		if errb != nil {
-			log.Printf("could not broadcast to server %s: %v", port, errb)
-			status, ok := status.FromError(err)
-			if ok {
-				if status.Code() == codes.DeadlineExceeded {
-					log.Printf("Server %s timeout, Messenger exit", port)
+		select {
+		case proposal := <-propBuffers[serial]:
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			r, err := client.Broadcast(ctx, proposal)
+			cancel() // defer?
+			if err != nil {
+				log.Printf("could not broadcast to server %s: %v", port, err)
+				status, ok := status.FromError(err)
+				if ok {
+					if status.Code() == codes.DeadlineExceeded {
+						log.Printf("Server %s timeout, Messenger exit", port)
+					}
+				}
+				// dead Messenger
+				log.Printf("messenger on %s initiated death mode", port)
+				ackBuffer <- Ack{false, serial, -1, -1}
+				for {
+					<-propBuffers[serial]
+					ackBuffer <- Ack{false, serial, -1, -1}
 				}
 			}
+			if r.GetContent() == "I Acknowledged" {
+				ackBuffer <- Ack{true, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
+			}
+		case <-death:
 			// dead Messenger
 			log.Printf("messenger on %s initiated death mode", port)
-			ackBuffer <- Ack{false, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
+			ackBuffer <- Ack{false, serial, -1, -1}
 			for {
-				proposal = <-propBuffers[serial]
-				ackBuffer <- Ack{false, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
+				<-propBuffers[serial]
+				ackBuffer <- Ack{false, serial, -1, -1}
 			}
-		}
-		if rb.GetContent() == "I Acknowledged" {
-			ackBuffer <- Ack{true, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
 		}
 
 		// send commit
 		commit := <-commitBuffers[serial]
-		rc, errc := client.Commit(context.Background(), commit)
-		if errc != nil {
-			log.Printf("could not issue commit to server %s: %v", port, errc)
+		r, err := client.Commit(context.Background(), commit)
+		if err != nil {
+			log.Printf("could not issue commit to server %s: %v", port, err)
 		}
-		if rc.GetContent() == "Commit message recieved" {
+		if r.GetContent() == "Commit message recieved" {
 			log.Printf("Commit feedback recieved from %s", port)
 		}
+	}
+}
+
+func HeartBeatRoutine(client pb.FollowerLeaderClient, death chan string) {
+	for {
+		time.Sleep(10 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		r, err := client.HeartBeat(ctx, &pb.Empty{Content: "Beat"})
+		cancel() // defer?
+		if err != nil {
+			death <- "dead"
+			return
+		}
+		log.Printf("%s", r.GetContent())
 	}
 }

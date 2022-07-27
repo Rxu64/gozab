@@ -8,6 +8,7 @@ package gozab;
 service FollowerLeader {
     rpc Broadcast (PropTxn) returns (AckTxn) {}
     rpc Commit (CommitTxn) returns (Empty) {}
+    rpc HeartBeat (Empty) returns (Empty) {}
 }
 
 // the service leader provide to user

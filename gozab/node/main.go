@@ -52,9 +52,11 @@ var (
 	propBuffers   [5]chan *pb.PropTxn
 	commitBuffers [5]chan *pb.CommitTxn
 	ackBuffer     chan Ack // size 5 queue
-	upFollowers            = []bool{true, true, true, true, true}
-	lastEpoch     int32    = 1
-	lastCount     int32    = 0
+	beatBuffer    chan int // size 5 buffer
+	leaderStat    chan string
+	upFollowers         = []bool{true, true, true, true, true}
+	lastEpoch     int32 = 1
+	lastCount     int32 = 0
 
 	pStorage []Proposal
 	dStruct  map[string]int32
@@ -147,10 +149,23 @@ func (s *followerServer) Commit(ctx context.Context, in *pb.CommitTxn) (*pb.Empt
 
 // Follower: implementation of HeartBeat handler
 func (s *followerServer) HeartBeat(ctx context.Context, in *pb.Empty) (*pb.Empty, error) {
+	beatBuffer <- 1
 	return &pb.Empty{Content: "bump"}, nil
 }
 
 func FollowerRoutine(port string) {
+	// follower receiving leader's heartbeat
+	beatBuffer = make(chan int, 5)
+	leaderStat = make(chan string)
+	go BeatReceiver(leaderStat)
+
+	go register(port)
+
+	<-leaderStat
+	log.Fatalf("leader dead")
+}
+
+func register(port string) {
 	// listen on port
 	lis, err := net.Listen("tcp", port)
 	if err != nil {
@@ -204,8 +219,9 @@ func MessengerRoutine(port string, serial int32) {
 
 	client := pb.NewFollowerLeaderClient(conn)
 
-	death := make(chan string)
-	go HeartBeatRoutine(client, death)
+	// leader receiving follower's heartbeat
+	followerStat := make(chan string)
+	go BeatSender(client, followerStat)
 
 	for {
 		// send proposal
@@ -233,7 +249,7 @@ func MessengerRoutine(port string, serial int32) {
 			if r.GetContent() == "I Acknowledged" {
 				ackBuffer <- Ack{true, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
 			}
-		case <-death:
+		case <-followerStat:
 			// dead Messenger
 			log.Printf("messenger on %s initiated death mode", port)
 			ackBuffer <- Ack{false, serial, -1, -1}
@@ -255,16 +271,27 @@ func MessengerRoutine(port string, serial int32) {
 	}
 }
 
-func HeartBeatRoutine(client pb.FollowerLeaderClient, death chan string) {
+func BeatSender(client pb.FollowerLeaderClient, followerStat chan string) {
 	for {
-		time.Sleep(10 * time.Millisecond)
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		r, err := client.HeartBeat(ctx, &pb.Empty{Content: "Beat"})
+		time.Sleep(100 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := client.HeartBeat(ctx, &pb.Empty{Content: "Beat"})
 		cancel() // defer?
 		if err != nil {
-			death <- "dead"
+			followerStat <- "dead"
 			return
 		}
-		log.Printf("%s", r.GetContent())
+	}
+}
+
+func BeatReceiver(leaderStat chan string) {
+	for {
+		select {
+		case <-beatBuffer:
+			log.Printf("beat")
+		case <-time.After(5 * time.Second):
+			leaderStat <- "dead"
+			return
+		}
 	}
 }

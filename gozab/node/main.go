@@ -252,7 +252,6 @@ func MessengerRoutine(port string, serial int32) {
 		case <-followerStat:
 			// dead Messenger
 			log.Printf("messenger on %s initiated death mode", port)
-			ackBuffer <- Ack{false, serial, -1, -1}
 			for {
 				<-propBuffers[serial]
 				ackBuffer <- Ack{false, serial, -1, -1}
@@ -261,9 +260,23 @@ func MessengerRoutine(port string, serial int32) {
 
 		// send commit
 		commit := <-commitBuffers[serial]
-		r, err := client.Commit(context.Background(), commit)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		r, err := client.Commit(ctx, commit)
+		cancel() // defer?
 		if err != nil {
 			log.Printf("could not issue commit to server %s: %v", port, err)
+			status, ok := status.FromError(err)
+			if ok {
+				if status.Code() == codes.DeadlineExceeded {
+					log.Printf("Server %s timeout, Messenger exit", port)
+				}
+			}
+			// dead Messenger
+			log.Printf("messenger on %s initiated death mode", port)
+			for {
+				<-propBuffers[serial]
+				ackBuffer <- Ack{false, serial, -1, -1}
+			}
 		}
 		if r.GetContent() == "Commit message recieved" {
 			log.Printf("Commit feedback recieved from %s", port)

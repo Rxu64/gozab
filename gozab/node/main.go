@@ -55,6 +55,7 @@ var (
 	beatBuffer    chan int // size 5 buffer
 	leaderStat    chan string
 	upFollowers         = []bool{true, true, true, true, true}
+	upNum         int32 = serverNum
 	lastEpoch     int32 = 1
 	lastCount     int32 = 0
 
@@ -182,7 +183,6 @@ func register(port string) {
 }
 
 func AckToCmtRoutine() {
-	upNum := serverNum
 	for {
 		// Collect acknowledgements from Messengers
 		// Update upFollowers statistics
@@ -223,64 +223,75 @@ func MessengerRoutine(port string, serial int32) {
 	followerStat := make(chan string)
 	go BeatSender(client, followerStat)
 
-	for {
-		// send proposal
-		select {
-		case proposal := <-propBuffers[serial]:
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			r, err := client.Broadcast(ctx, proposal)
-			cancel() // defer?
-			if err != nil {
-				log.Printf("could not broadcast to server %s: %v", port, err)
-				status, ok := status.FromError(err)
-				if ok {
-					if status.Code() == codes.DeadlineExceeded {
-						log.Printf("Server %s timeout, Messenger exit", port)
-					}
-				}
-				// dead Messenger
-				log.Printf("messenger on %s initiated death mode", port)
-				ackBuffer <- Ack{false, serial, -1, -1}
-				for {
-					<-propBuffers[serial]
-					ackBuffer <- Ack{false, serial, -1, -1}
-				}
-			}
-			if r.GetContent() == "I Acknowledged" {
-				ackBuffer <- Ack{true, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
-			}
-		case <-followerStat:
-			// dead Messenger
-			log.Printf("messenger on %s initiated death mode", port)
-			for {
-				<-propBuffers[serial]
-				ackBuffer <- Ack{false, serial, -1, -1}
-			}
-		}
+	go propcmt(client, port, serial)
 
-		// send commit
-		commit := <-commitBuffers[serial]
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		r, err := client.Commit(ctx, commit)
-		cancel() // defer?
-		if err != nil {
-			log.Printf("could not issue commit to server %s: %v", port, err)
-			status, ok := status.FromError(err)
-			if ok {
-				if status.Code() == codes.DeadlineExceeded {
-					log.Printf("Server %s timeout, Messenger exit", port)
-				}
-			}
-			// dead Messenger
-			log.Printf("messenger on %s initiated death mode", port)
-			for {
-				<-propBuffers[serial]
-				ackBuffer <- Ack{false, serial, -1, -1}
+	<-followerStat
+	upFollowers[serial] = false
+	upNum--
+	log.Printf("follower %s down, messenger quit", port)
+	// check quorum dead
+	if upNum <= serverNum/2 {
+		log.Fatalf("quorum dead")
+	}
+}
+
+func propcmt(client pb.FollowerLeaderClient, port string, serial int32) {
+	for {
+		prop(client, port, serial)
+		cmt(client, port, serial)
+	}
+}
+
+func prop(client pb.FollowerLeaderClient, port string, serial int32) {
+	// send proposal
+	proposal := <-propBuffers[serial]
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	r, err := client.Broadcast(ctx, proposal)
+	cancel() // defer?
+	if err != nil {
+		log.Printf("could not broadcast to server %s: %v", port, err)
+		status, ok := status.FromError(err)
+		if ok {
+			if status.Code() == codes.DeadlineExceeded {
+				log.Printf("Server %s timeout, Messenger exit", port)
 			}
 		}
-		if r.GetContent() == "Commit message recieved" {
-			log.Printf("Commit feedback recieved from %s", port)
+		// dead Messenger
+		log.Printf("messenger on %s initiated death mode", port)
+		ackBuffer <- Ack{false, serial, -1, -1}
+		for {
+			<-propBuffers[serial]
+			ackBuffer <- Ack{false, serial, -1, -1}
 		}
+	}
+	if r.GetContent() == "I Acknowledged" {
+		ackBuffer <- Ack{true, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
+	}
+}
+
+func cmt(client pb.FollowerLeaderClient, port string, serial int32) {
+	// send commit
+	commit := <-commitBuffers[serial]
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	r, err := client.Commit(ctx, commit)
+	cancel() // defer?
+	if err != nil {
+		log.Printf("could not issue commit to server %s: %v", port, err)
+		status, ok := status.FromError(err)
+		if ok {
+			if status.Code() == codes.DeadlineExceeded {
+				log.Printf("Server %s timeout, Messenger exit", port)
+			}
+		}
+		// dead Messenger
+		log.Printf("messenger on %s initiated death mode", port)
+		for {
+			<-propBuffers[serial]
+			ackBuffer <- Ack{false, serial, -1, -1}
+		}
+	}
+	if r.GetContent() == "Commit message recieved" {
+		log.Printf("Commit feedback recieved from %s", port)
 	}
 }
 

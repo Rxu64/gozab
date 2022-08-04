@@ -15,11 +15,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const (
-	serverNum = 5
-	userPort  = "localhost:50056"
-)
-
 type Vec struct {
 	key   string
 	value int32
@@ -48,16 +43,20 @@ type Ack struct {
 }
 
 var (
-	serverPorts   = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
+	serverNum   = 5
+	userPort    = "localhost:50056"
+	serverPorts = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
+
 	propBuffers   [5]chan *pb.PropTxn
 	commitBuffers [5]chan *pb.CommitTxn
 	ackBuffer     chan Ack // size 5 queue
 	beatBuffer    chan int // size 5 buffer
-	leaderStat    chan string
-	upFollowers         = []bool{true, true, true, true, true}
-	upNum         int32 = serverNum
-	lastEpoch     int32 = 1
-	lastCount     int32 = 0
+
+	upFollowers = []bool{true, true, true, true, true}
+	upNum       = serverNum
+
+	lastEpoch int32 = 1
+	lastCount int32 = 0
 
 	pStorage []Proposal
 	dStruct  map[string]int32
@@ -166,7 +165,7 @@ func (s *followerServer) HeartBeat(ctx context.Context, in *pb.Empty) (*pb.Empty
 func FollowerRoutine(port string) {
 	// follower receiving leader's heartbeat
 	beatBuffer = make(chan int, 5)
-	leaderStat = make(chan string)
+	leaderStat := make(chan string)
 	go BeatReceiver(leaderStat)
 
 	go registerF(port)

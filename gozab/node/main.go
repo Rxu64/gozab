@@ -78,9 +78,9 @@ func main() {
 		LeaderRoutine(os.Args[2])
 	} else if os.Args[1] == "follow" {
 		FollowerRoutine(os.Args[2])
-	} else {
-		log.Fatalf("unknown command")
 	}
+	// default: election
+	log.Printf("entering election...")
 }
 
 // Leader: implementation of user Store handler
@@ -108,14 +108,23 @@ func LeaderRoutine(port string) {
 
 	go FollowerRoutine(port)
 
-	go MessengerRoutine(serverPorts[0], 0)
-	go MessengerRoutine(serverPorts[1], 1)
-	go MessengerRoutine(serverPorts[2], 2)
-	go MessengerRoutine(serverPorts[3], 3)
-	go MessengerRoutine(serverPorts[4], 4)
+	messengerStat := make(chan string)
+
+	go MessengerRoutine(serverPorts[0], 0, messengerStat)
+	go MessengerRoutine(serverPorts[1], 1, messengerStat)
+	go MessengerRoutine(serverPorts[2], 2, messengerStat)
+	go MessengerRoutine(serverPorts[3], 3, messengerStat)
+	go MessengerRoutine(serverPorts[4], 4, messengerStat)
 
 	go AckToCmtRoutine()
 
+	go registerL()
+
+	<-messengerStat
+	log.Printf("quorum dead")
+}
+
+func registerL() {
 	// listen user
 	lis, err := net.Listen("tcp", userPort)
 	if err != nil {
@@ -160,20 +169,18 @@ func FollowerRoutine(port string) {
 	leaderStat = make(chan string)
 	go BeatReceiver(leaderStat)
 
-	go register(port)
+	go registerF(port)
 
 	<-leaderStat
-	log.Fatalf("leader dead")
+	log.Printf("leader dead")
 }
 
-func register(port string) {
-	// listen on port
+func registerF(port string) {
+	// listen leader on port
 	lis, err := net.Listen("tcp", port)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
-
-	// register server
 	s := grpc.NewServer()
 	pb.RegisterFollowerLeaderServer(s, &followerServer{})
 	log.Printf("server listening at %v", lis.Addr())
@@ -196,7 +203,8 @@ func AckToCmtRoutine() {
 
 		// Check if quorum dead
 		if upNum <= serverNum/2 {
-			log.Fatalf("quorum dead")
+			log.Printf("quorum dead")
+			return
 		}
 
 		// Send commits to the acknowledged followers
@@ -209,7 +217,7 @@ func AckToCmtRoutine() {
 }
 
 // CORE BROACAST FUNCTION!
-func MessengerRoutine(port string, serial int32) {
+func MessengerRoutine(port string, serial int32, messengerStat chan string) {
 	// dial follower
 	conn, err := grpc.Dial(serverPorts[serial], grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -231,7 +239,7 @@ func MessengerRoutine(port string, serial int32) {
 	log.Printf("follower %s down, messenger quit", port)
 	// check quorum dead
 	if upNum <= serverNum/2 {
-		log.Fatalf("quorum dead")
+		messengerStat <- "returned"
 	}
 }
 

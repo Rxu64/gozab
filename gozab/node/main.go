@@ -63,7 +63,8 @@ var (
 	dStruct  map[string]int32
 
 	voted         chan int32
-	currentLeader string // change all the for loops
+	voteBuffer    chan bool // size 5 buffer
+	currentLeader string    // change all the for loops
 )
 
 type leaderServer struct {
@@ -174,9 +175,50 @@ func ElectionRoutine(port string) {
 	// time to check
 	select {
 	case <-voted:
-		// dial and askvote
+		voteCount := 0
+		voteBuffer = make(chan bool, 5)
+		go ElectionMessengerRoutine(serverPorts[0])
+		go ElectionMessengerRoutine(serverPorts[1])
+		go ElectionMessengerRoutine(serverPorts[2])
+		go ElectionMessengerRoutine(serverPorts[3])
+		go ElectionMessengerRoutine(serverPorts[4])
+		for i := 0; i < 5; i++ {
+			if <-voteBuffer {
+				voteCount++
+			}
+		}
+		if voteCount <= serverNum/2 {
+			// restart election
+			ElectionRoutine(port)
+		}
+		// become prospective leader
+		// TODO: synchronization
 	default:
-		// follow
+		// become follower
+		// TODO: synchronization
+	}
+}
+
+func ElectionMessengerRoutine(port string) {
+	// dial and askvote
+	conn, err := grpc.Dial(port, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Printf("could not connect to server %s: %v", port, err)
+	}
+	defer conn.Close()
+
+	client := pb.NewVoterCandidateClient(conn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	r, err := client.AskVote(ctx, &pb.VoteRequest{Epoch: lastEpoch})
+	if r != nil {
+		voteBuffer <- false
+		log.Printf("failed to ask vote from %s: %v", port, err)
+		return
+	}
+	if r.GetVoted() {
+		voteBuffer <- true
 	}
 }
 

@@ -17,6 +17,19 @@ service LeaderUser {
     rpc Retrieve (GetTxn) returns (ResultTxn) {}
 }
 
+// the service during election
+service VoterCandidate {
+    rpc AskVote (VoteRequest) returns (Vote) {}
+}
+
+message VoteRequest {
+    int32 epoch = 1;
+}
+
+message Vote {
+    bool voted = 1;
+}
+
 message Vec {
     string key = 1;
     int32 value = 2;

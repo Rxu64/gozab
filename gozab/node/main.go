@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"time"
@@ -60,6 +61,9 @@ var (
 
 	pStorage []Proposal
 	dStruct  map[string]int32
+
+	voted         chan int32
+	currentLeader string // change all the for loops
 )
 
 type leaderServer struct {
@@ -68,6 +72,10 @@ type leaderServer struct {
 
 type followerServer struct {
 	pb.UnimplementedFollowerLeaderServer
+}
+
+type voterServer struct {
+	pb.UnimplementedVoterCandidateServer
 }
 
 func main() {
@@ -80,6 +88,7 @@ func main() {
 	}
 	// default: election
 	log.Printf("entering election...")
+	ElectionRoutine(os.Args[2])
 }
 
 // Leader: implementation of user Store handler
@@ -132,6 +141,54 @@ func registerL() {
 	s := grpc.NewServer()
 	pb.RegisterLeaderUserServer(s, &leaderServer{})
 	log.Printf("leader listening at %v", lis.Addr())
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("failed to serve: %v", err)
+	}
+}
+
+// Voter: implementation of AskVote handler
+func (s *leaderServer) AskVote(ctx context.Context, in *pb.VoteRequest) (*pb.Vote, error) {
+	log.Printf("Leader received user retrieve\n")
+	// check CEPOCH
+	if in.GetEpoch() < lastEpoch {
+		return &pb.Vote{Voted: false}, nil
+	}
+	select {
+	case <-voted:
+		return &pb.Vote{Voted: true}, nil
+	default:
+		return &pb.Vote{Voted: false}, nil
+	}
+
+}
+
+func ElectionRoutine(port string) {
+	voted = make(chan int32)
+	voted <- 0
+	go registerV(port)
+
+	rand.Seed(time.Now().UnixNano())
+	n := rand.Intn(10) // n will be between 0 and 10
+
+	time.Sleep(time.Duration(n) * time.Millisecond)
+	// time to check
+	select {
+	case <-voted:
+		// dial and askvote
+	default:
+		// follow
+	}
+}
+
+func registerV(port string) {
+	// listen port
+	lis, err := net.Listen("tcp", port)
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	s := grpc.NewServer()
+	pb.RegisterVoterCandidateServer(s, &voterServer{})
+	log.Printf("voter listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}

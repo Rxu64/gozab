@@ -49,9 +49,9 @@ var (
 	pStorage []*pb.PropTxn
 	dStruct  map[string]int32
 
-	voted         chan int32
-	voteBuffer    chan bool // size 5 buffer
-	currentLeader string    // change all the for loops
+	voted                   chan int32
+	voteRequestResultBuffer chan stateEpoch // size 5 buffer
+	currentLeader           string          // change all the for loops
 )
 
 type leaderServer struct {
@@ -64,6 +64,16 @@ type followerServer struct {
 
 type voterServer struct {
 	pb.UnimplementedVoterCandidateServer
+}
+
+type stateEpoch struct {
+	state bool
+	epoch int32
+}
+
+type stateHist struct {
+	state bool
+	hist  []*pb.PropTxn
 }
 
 func main() {
@@ -140,10 +150,6 @@ func registerL() {
 // Voter: implementation of AskVote handler
 func (s *voterServer) AskVote(ctx context.Context, in *pb.Epoch) (*pb.Vote, error) {
 	log.Printf("Leader received user retrieve\n")
-	// check CEPOCH
-	if in.GetEpoch() < lastEpochProp {
-		return &pb.Vote{Voted: false}, nil
-	}
 	select {
 	case <-voted:
 		return &pb.Vote{Voted: true}, nil
@@ -176,35 +182,72 @@ func ElectionRoutine(port string) {
 	time.Sleep(time.Duration(n) * time.Millisecond)
 	// time to check
 	select {
+	// didn't receive request, try to be leader
 	case <-voted:
+
+		// initialize routines
 		voteCount := 0
-		voteBuffer = make(chan bool, 5)
-		electionHolder := make(chan bool, 5)
-		go ElectionMessengerRoutine(serverPorts[0], electionHolder)
-		go ElectionMessengerRoutine(serverPorts[1], electionHolder)
-		go ElectionMessengerRoutine(serverPorts[2], electionHolder)
-		go ElectionMessengerRoutine(serverPorts[3], electionHolder)
-		go ElectionMessengerRoutine(serverPorts[4], electionHolder)
+		ackeCount := 0
+		voteRequestResultBuffer = make(chan stateEpoch, 5)
+		electionHolder := make(chan stateEpoch, 5)
+		synchronizationHolder := make(chan stateHist, 5)
+		ackeResultBuffer := make(chan stateHist, 5)
+		go ElectionMessengerRoutine(serverPorts[0], electionHolder, synchronizationHolder, ackeResultBuffer)
+		go ElectionMessengerRoutine(serverPorts[1], electionHolder, synchronizationHolder, ackeResultBuffer)
+		go ElectionMessengerRoutine(serverPorts[2], electionHolder, synchronizationHolder, ackeResultBuffer)
+		go ElectionMessengerRoutine(serverPorts[3], electionHolder, synchronizationHolder, ackeResultBuffer)
+		go ElectionMessengerRoutine(serverPorts[4], electionHolder, synchronizationHolder, ackeResultBuffer)
+
+		// check vote request results
+		var latestE int32 = -1
 		for i := 0; i < 5; i++ {
-			if <-voteBuffer {
+			result := <-voteRequestResultBuffer
+			if result.state {
 				voteCount++
+				if result.epoch > latestE {
+					latestE = result.epoch
+				}
 			}
 		}
+		lastEpoch = latestE + 1
 		if voteCount <= serverNum/2 {
 			// cancel ElectionMessengerRoutine, restart election
 			for i := 0; i < 5; i++ {
-				electionHolder <- false
+				electionHolder <- stateEpoch{false, -1}
 			}
 			go ElectionRoutine(port)
 			return
 		} else {
-			// proceed ElectionMessengerRoutine
+			// let ElectionMessengerRoutines proceed
 			for i := 0; i < 5; i++ {
-				electionHolder <- true
+				electionHolder <- stateEpoch{true, lastEpoch}
 			}
 		}
 
-		// TODO: select initial history
+		// check ACK-E results
+		var latestHist = []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}
+		for i := 0; i < 5; i++ {
+			result := <-ackeResultBuffer
+			if result.state {
+				ackeCount++
+				if result.hist[len(result.hist)-1].E > latestHist[len(latestHist)].E || result.hist[len(result.hist)-1].E == latestHist[len(latestHist)].E && result.hist[len(result.hist)-1].Transaction.Z.Counter >= latestHist[len(latestHist)].Transaction.Z.Counter {
+					latestHist = result.hist
+				}
+			}
+		}
+		if ackeCount <= serverNum/2 {
+			// restart election
+			for i := 0; i < 5; i++ {
+				synchronizationHolder <- stateHist{false, []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}}
+			}
+			go ElectionRoutine(port)
+			return
+		} else {
+			// let ElectionMessengerRoutines proceed
+			for i := 0; i < 5; i++ {
+				synchronizationHolder <- stateHist{true, latestHist}
+			}
+		}
 
 		// become prospective leader
 		// TODO: synchronization
@@ -214,7 +257,7 @@ func ElectionRoutine(port string) {
 	}
 }
 
-func ElectionMessengerRoutine(port string, holder chan bool) {
+func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, synchronizationHolder chan stateHist, ackeResultBuffer chan stateHist) {
 	// dial and askvote
 	conn, err := grpc.Dial(port, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -224,27 +267,42 @@ func ElectionMessengerRoutine(port string, holder chan bool) {
 
 	client := pb.NewVoterCandidateClient(conn)
 
+	askvoteHelper(port, client)
+
+	// wait for quorum check
+	check := <-electionHolder
+	if !check.state {
+		return
+	}
+	// proceed, send new epoch
+	newepochHelper(port, check, ackeResultBuffer, client)
+}
+
+func askvoteHelper(port string, client pb.VoterCandidateClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	r, err := client.AskVote(ctx, &pb.Epoch{Epoch: lastEpochProp})
 	if r != nil {
-		voteBuffer <- false
+		voteRequestResultBuffer <- stateEpoch{false, -1}
 		log.Printf("failed to ask vote from %s: %v", port, err)
 		return
 	}
 	if r.GetVoted() {
-		voteBuffer <- true
+		voteRequestResultBuffer <- stateEpoch{true, lastEpochProp}
 	}
-	// wait for quorum check
-	if !<-holder {
+}
+
+func newepochHelper(port string, check stateEpoch, ackeResultBuffer chan stateHist, client pb.VoterCandidateClient) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	hist, err := client.NewEpoch(ctx, &pb.Epoch{Epoch: check.epoch})
+	if err != nil {
+		// this messenger is dead
+		ackeResultBuffer <- stateHist{false, nil}
+		log.Printf("messenger quit: failed to get ACK-E from %s: %v", port, err)
 		return
 	}
-	// proceed, send new epoch
-	hist, err := client.NewEpoch(ctx, &pb.Epoch{Epoch: lastEpochProp})
-	if err != nil {
-		// TODO: should restart election
-		log.Printf("failed to get ACK-E from %s: %v", port, err)
-	}
+	ackeResultBuffer <- stateHist{true, hist.GetHist()}
 }
 
 func registerV(port string) {

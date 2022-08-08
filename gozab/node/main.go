@@ -56,8 +56,13 @@ var (
 	upFollowers = []bool{true, true, true, true, true}
 	upNum       = serverNum
 
-	lastEpoch int32 = 1
+	// for leader convenience only
+	lastEpoch int32 = 0
 	lastCount int32 = 0
+
+	// for follower use
+	lastEpochProp  int32 = 0
+	lastLeaderProp int32 = 0
 
 	pStorage []Proposal
 	dStruct  map[string]int32
@@ -89,7 +94,9 @@ func main() {
 	}
 	// default: election
 	log.Printf("entering election...")
+	mainHolder := make(chan int) // prevent main from exiting
 	ElectionRoutine(os.Args[2])
+	<-mainHolder
 }
 
 // Leader: implementation of user Store handler
@@ -148,7 +155,7 @@ func registerL() {
 }
 
 // Voter: implementation of AskVote handler
-func (s *leaderServer) AskVote(ctx context.Context, in *pb.VoteRequest) (*pb.Vote, error) {
+func (s *voterServer) AskVote(ctx context.Context, in *pb.Epoch) (*pb.Vote, error) {
 	log.Printf("Leader received user retrieve\n")
 	// check CEPOCH
 	if in.GetEpoch() < lastEpoch {
@@ -161,6 +168,19 @@ func (s *leaderServer) AskVote(ctx context.Context, in *pb.VoteRequest) (*pb.Vot
 		return &pb.Vote{Voted: false}, nil
 	}
 
+}
+
+// Voter: implementation of ACK-E handler
+func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.ACK_E, error) {
+	// check new epoch
+	if lastEpochProp >= in.GetEpoch() {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"new epoch not new enough")
+	}
+
+	// acknowledge new epoch proposal
+	// TODO: change pStorage to 2d array, return history under last leader
+	return nil, nil
 }
 
 func ElectionRoutine(port string) {
@@ -189,8 +209,12 @@ func ElectionRoutine(port string) {
 		}
 		if voteCount <= serverNum/2 {
 			// restart election
-			ElectionRoutine(port)
+			go ElectionRoutine(port)
+			return
 		}
+
+		// TODO: select initial history
+
 		// become prospective leader
 		// TODO: synchronization
 	default:
@@ -211,7 +235,7 @@ func ElectionMessengerRoutine(port string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	r, err := client.AskVote(ctx, &pb.VoteRequest{Epoch: lastEpoch})
+	r, err := client.AskVote(ctx, &pb.Epoch{Epoch: lastEpoch})
 	if r != nil {
 		voteBuffer <- false
 		log.Printf("failed to ask vote from %s: %v", port, err)

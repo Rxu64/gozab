@@ -302,7 +302,8 @@ var LeaderUser_ServiceDesc = grpc.ServiceDesc{
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type VoterCandidateClient interface {
-	AskVote(ctx context.Context, in *VoteRequest, opts ...grpc.CallOption) (*Vote, error)
+	AskVote(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*Vote, error)
+	NewEpoch(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*ACK_E, error)
 }
 
 type voterCandidateClient struct {
@@ -313,9 +314,18 @@ func NewVoterCandidateClient(cc grpc.ClientConnInterface) VoterCandidateClient {
 	return &voterCandidateClient{cc}
 }
 
-func (c *voterCandidateClient) AskVote(ctx context.Context, in *VoteRequest, opts ...grpc.CallOption) (*Vote, error) {
+func (c *voterCandidateClient) AskVote(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*Vote, error) {
 	out := new(Vote)
 	err := c.cc.Invoke(ctx, "/gozab.VoterCandidate/AskVote", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *voterCandidateClient) NewEpoch(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*ACK_E, error) {
+	out := new(ACK_E)
+	err := c.cc.Invoke(ctx, "/gozab.VoterCandidate/NewEpoch", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +336,8 @@ func (c *voterCandidateClient) AskVote(ctx context.Context, in *VoteRequest, opt
 // All implementations must embed UnimplementedVoterCandidateServer
 // for forward compatibility
 type VoterCandidateServer interface {
-	AskVote(context.Context, *VoteRequest) (*Vote, error)
+	AskVote(context.Context, *Epoch) (*Vote, error)
+	NewEpoch(context.Context, *Epoch) (*ACK_E, error)
 	mustEmbedUnimplementedVoterCandidateServer()
 }
 
@@ -334,8 +345,11 @@ type VoterCandidateServer interface {
 type UnimplementedVoterCandidateServer struct {
 }
 
-func (UnimplementedVoterCandidateServer) AskVote(context.Context, *VoteRequest) (*Vote, error) {
+func (UnimplementedVoterCandidateServer) AskVote(context.Context, *Epoch) (*Vote, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AskVote not implemented")
+}
+func (UnimplementedVoterCandidateServer) NewEpoch(context.Context, *Epoch) (*ACK_E, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NewEpoch not implemented")
 }
 func (UnimplementedVoterCandidateServer) mustEmbedUnimplementedVoterCandidateServer() {}
 
@@ -351,7 +365,7 @@ func RegisterVoterCandidateServer(s grpc.ServiceRegistrar, srv VoterCandidateSer
 }
 
 func _VoterCandidate_AskVote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(VoteRequest)
+	in := new(Epoch)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -363,7 +377,25 @@ func _VoterCandidate_AskVote_Handler(srv interface{}, ctx context.Context, dec f
 		FullMethod: "/gozab.VoterCandidate/AskVote",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(VoterCandidateServer).AskVote(ctx, req.(*VoteRequest))
+		return srv.(VoterCandidateServer).AskVote(ctx, req.(*Epoch))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VoterCandidate_NewEpoch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Epoch)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VoterCandidateServer).NewEpoch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gozab.VoterCandidate/NewEpoch",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VoterCandidateServer).NewEpoch(ctx, req.(*Epoch))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -378,6 +410,10 @@ var VoterCandidate_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AskVote",
 			Handler:    _VoterCandidate_AskVote_Handler,
+		},
+		{
+			MethodName: "NewEpoch",
+			Handler:    _VoterCandidate_NewEpoch_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

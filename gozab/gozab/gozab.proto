@@ -19,10 +19,16 @@ service LeaderUser {
 
 // the service during election
 service VoterCandidate {
-    rpc AskVote (VoteRequest) returns (Vote) {}
+    rpc AskVote (Epoch) returns (Vote) {}
+    rpc NewEpoch (Epoch) returns (ACK_E) {}
 }
 
-message VoteRequest {
+message ACK_E {
+    int32 lastLeaderProp = 1;
+    repeated PropTxn hist = 2;
+}
+
+message Epoch {
     int32 epoch = 1;
 }
 

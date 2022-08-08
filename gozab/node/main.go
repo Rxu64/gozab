@@ -16,26 +16,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type Vec struct {
-	key   string
-	value int32
-}
-
-type Zxid struct {
-	epoch   int32
-	counter int32
-}
-
-type Transaction struct {
-	v Vec
-	z Zxid
-}
-
-type Proposal struct {
-	e   int32
-	txn Transaction
-}
-
 type Ack struct {
 	valid   bool
 	serial  int32
@@ -61,10 +41,12 @@ var (
 	lastCount int32 = 0
 
 	// for follower use
+	// TODO: remember to update these
 	lastEpochProp  int32 = 0
 	lastLeaderProp int32 = 0
 
-	pStorage []Proposal
+	archive  []*pb.PropTxn
+	pStorage []*pb.PropTxn
 	dStruct  map[string]int32
 
 	voted         chan int32
@@ -85,7 +67,8 @@ type voterServer struct {
 }
 
 func main() {
-	pStorage = make([]Proposal, 0)
+	archive = make([]*pb.PropTxn, 0)
+	pStorage = make([]*pb.PropTxn, 0) // TODO: merge current pStorage into archive and declare new pStorage
 	dStruct = make(map[string]int32)
 	if os.Args[1] == "lead" {
 		LeaderRoutine(os.Args[2])
@@ -158,7 +141,7 @@ func registerL() {
 func (s *voterServer) AskVote(ctx context.Context, in *pb.Epoch) (*pb.Vote, error) {
 	log.Printf("Leader received user retrieve\n")
 	// check CEPOCH
-	if in.GetEpoch() < lastEpoch {
+	if in.GetEpoch() < lastEpochProp {
 		return &pb.Vote{Voted: false}, nil
 	}
 	select {
@@ -179,8 +162,7 @@ func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.ACK_E, er
 	}
 
 	// acknowledge new epoch proposal
-	// TODO: change pStorage to 2d array, return history under last leader
-	return nil, nil
+	return &pb.ACK_E{LastLeaderProp: lastLeaderProp, Hist: pStorage}, nil
 }
 
 func ElectionRoutine(port string) {
@@ -235,7 +217,7 @@ func ElectionMessengerRoutine(port string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	r, err := client.AskVote(ctx, &pb.Epoch{Epoch: lastEpoch})
+	r, err := client.AskVote(ctx, &pb.Epoch{Epoch: lastEpochProp})
 	if r != nil {
 		voteBuffer <- false
 		log.Printf("failed to ask vote from %s: %v", port, err)
@@ -264,8 +246,7 @@ func registerV(port string) {
 func (s *followerServer) Broadcast(ctx context.Context, in *pb.PropTxn) (*pb.AckTxn, error) {
 	log.Printf("Follower received proposal\n")
 	// writes the proposal to local stable storage
-	var prop = Proposal{in.GetE(), Transaction{Vec{in.GetTransaction().GetV().GetKey(), in.GetTransaction().GetV().GetValue()}, Zxid{in.GetTransaction().GetZ().GetEpoch(), in.GetTransaction().GetZ().GetCounter()}}}
-	pStorage = append(pStorage, prop)
+	pStorage = append(pStorage, in)
 	log.Printf("local stable storage: %+v\n", pStorage)
 	return &pb.AckTxn{Content: "I Acknowledged"}, nil
 }
@@ -274,7 +255,7 @@ func (s *followerServer) Broadcast(ctx context.Context, in *pb.PropTxn) (*pb.Ack
 func (s *followerServer) Commit(ctx context.Context, in *pb.CommitTxn) (*pb.Empty, error) {
 	log.Printf("Follower received commit\n")
 	// writes the transaction from local stable storage to local data structure
-	dStruct[pStorage[len(pStorage)-1].txn.v.key] = pStorage[len(pStorage)-1].txn.v.value
+	dStruct[pStorage[len(pStorage)-1].Transaction.V.Key] = pStorage[len(pStorage)-1].Transaction.V.Value
 	log.Printf("local data structure: %+v\n", dStruct)
 	return &pb.Empty{Content: "Commit message recieved"}, nil
 }

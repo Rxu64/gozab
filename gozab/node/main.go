@@ -179,20 +179,29 @@ func ElectionRoutine(port string) {
 	case <-voted:
 		voteCount := 0
 		voteBuffer = make(chan bool, 5)
-		go ElectionMessengerRoutine(serverPorts[0])
-		go ElectionMessengerRoutine(serverPorts[1])
-		go ElectionMessengerRoutine(serverPorts[2])
-		go ElectionMessengerRoutine(serverPorts[3])
-		go ElectionMessengerRoutine(serverPorts[4])
+		electionHolder := make(chan bool, 5)
+		go ElectionMessengerRoutine(serverPorts[0], electionHolder)
+		go ElectionMessengerRoutine(serverPorts[1], electionHolder)
+		go ElectionMessengerRoutine(serverPorts[2], electionHolder)
+		go ElectionMessengerRoutine(serverPorts[3], electionHolder)
+		go ElectionMessengerRoutine(serverPorts[4], electionHolder)
 		for i := 0; i < 5; i++ {
 			if <-voteBuffer {
 				voteCount++
 			}
 		}
 		if voteCount <= serverNum/2 {
-			// restart election
+			// cancel ElectionMessengerRoutine, restart election
+			for i := 0; i < 5; i++ {
+				electionHolder <- false
+			}
 			go ElectionRoutine(port)
 			return
+		} else {
+			// proceed ElectionMessengerRoutine
+			for i := 0; i < 5; i++ {
+				electionHolder <- true
+			}
 		}
 
 		// TODO: select initial history
@@ -205,7 +214,7 @@ func ElectionRoutine(port string) {
 	}
 }
 
-func ElectionMessengerRoutine(port string) {
+func ElectionMessengerRoutine(port string, holder chan bool) {
 	// dial and askvote
 	conn, err := grpc.Dial(port, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -225,6 +234,16 @@ func ElectionMessengerRoutine(port string) {
 	}
 	if r.GetVoted() {
 		voteBuffer <- true
+	}
+	// wait for quorum check
+	if !<-holder {
+		return
+	}
+	// proceed, send new epoch
+	hist, err := client.NewEpoch(ctx, &pb.Epoch{Epoch: lastEpochProp})
+	if err != nil {
+		// TODO: should restart election
+		log.Printf("failed to get ACK-E from %s: %v", port, err)
 	}
 }
 

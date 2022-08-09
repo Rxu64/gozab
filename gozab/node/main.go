@@ -90,7 +90,7 @@ func main() {
 	// default: election
 	log.Printf("entering election...")
 	mainHolder := make(chan int) // prevent main from exiting
-	ElectionRoutine(os.Args[2], serverMap[os.Args[2]])
+	ElectionRoutine(os.Args[1], serverMap[os.Args[1]])
 	<-mainHolder
 }
 
@@ -180,10 +180,11 @@ func ElectionRoutine(port string, serial int32) {
 	voted = make(chan int32, 1)
 	voted <- 0
 	cancelDial := make(chan int32, 1)
-	go registerV(port, cancelDial)
-
+	signal := make(chan int32, 1)
+	go registerV(port, cancelDial, signal)
+	<-signal
 	rand.Seed(time.Now().UnixNano())
-	n := rand.Intn(10)*50 + 10 // n will be between 10 and 20
+	n := rand.Intn(10)*100 + 600 // n will be between 600 and 1500
 	log.Printf("entering random sleep...")
 	time.Sleep(time.Duration(n) * time.Millisecond)
 	log.Printf("woke up: %v", time.Duration(n)*time.Millisecond)
@@ -195,10 +196,10 @@ func ElectionRoutine(port string, serial int32) {
 		// initialize routines
 		voteCount := 0
 		ackeCount := 0
-		electionHolder := make(chan stateEpoch, 5)
-		voteRequestResultBuffer := make(chan stateEpoch, 5)
-		synchronizationHolder := make(chan stateHist, 5)
-		ackeResultBuffer := make(chan stateHist, 5)
+		electionHolder := make(chan stateEpoch, 4)
+		voteRequestResultBuffer := make(chan stateEpoch, 4)
+		synchronizationHolder := make(chan stateHist, 4)
+		ackeResultBuffer := make(chan stateHist, 4)
 		for i := 0; i < 5; i++ {
 			if int32(i) != serial {
 				go ElectionMessengerRoutine(serverPorts[i], electionHolder, voteRequestResultBuffer, synchronizationHolder, ackeResultBuffer)
@@ -206,10 +207,12 @@ func ElectionRoutine(port string, serial int32) {
 		}
 
 		// check vote request results
+		log.Printf("checking vote request results...")
 		var latestE int32 = -1
-		for i := 0; i < 5; i++ {
+		for i := 0; i < 4; i++ {
 			result := <-voteRequestResultBuffer
 			if result.state {
+				log.Printf("valid vote")
 				voteCount++
 				if result.epoch > latestE {
 					latestE = result.epoch
@@ -219,7 +222,8 @@ func ElectionRoutine(port string, serial int32) {
 		lastEpoch = latestE + 1
 		if voteCount <= serverNum/2 {
 			// cancel ElectionMessengerRoutine, restart election
-			for i := 0; i < 5; i++ {
+			log.Printf("restarting election...")
+			for i := 0; i < 4; i++ {
 				electionHolder <- stateEpoch{false, -1}
 			}
 			cancelDial <- 0
@@ -227,32 +231,40 @@ func ElectionRoutine(port string, serial int32) {
 			return
 		} else {
 			// let ElectionMessengerRoutines proceed
-			for i := 0; i < 5; i++ {
+			log.Printf("lifting election holder...")
+			for i := 0; i < 4; i++ {
 				electionHolder <- stateEpoch{true, lastEpoch}
 			}
 		}
 
 		// check ACK-E results
+		log.Printf("checking ACK-E results...")
 		var latestHist = []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}
-		for i := 0; i < 5; i++ {
+		for i := 0; i < 4; i++ {
 			result := <-ackeResultBuffer
 			if result.state {
+				log.Printf("valid ACK-E")
 				ackeCount++
-				if result.hist[len(result.hist)-1].E > latestHist[len(latestHist)-1].E || result.hist[len(result.hist)-1].E == latestHist[len(latestHist)-1].E && result.hist[len(result.hist)-1].Transaction.Z.Counter >= latestHist[len(latestHist)-1].Transaction.Z.Counter {
+				if len(result.hist) == 0 { // system startup, no history yet
+					latestHist = nil
+				} else if result.hist[len(result.hist)-1].E > latestHist[len(latestHist)-1].E || result.hist[len(result.hist)-1].E == latestHist[len(latestHist)-1].E && result.hist[len(result.hist)-1].Transaction.Z.Counter >= latestHist[len(latestHist)-1].Transaction.Z.Counter {
 					latestHist = result.hist
 				}
 			}
 		}
 		if ackeCount <= serverNum/2 {
 			// cancel ElectionMessengerRoutine, restart election
-			for i := 0; i < 5; i++ {
+			log.Printf("restarting election...")
+			for i := 0; i < 4; i++ {
 				synchronizationHolder <- stateHist{false, []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}}
 			}
+			cancelDial <- 0
 			go ElectionRoutine(port, serial)
 			return
 		} else {
 			// let ElectionMessengerRoutines proceed
-			for i := 0; i < 5; i++ {
+			log.Printf("lifting synchronization holder...")
+			for i := 0; i < 4; i++ {
 				synchronizationHolder <- stateHist{true, latestHist}
 			}
 		}
@@ -280,19 +292,27 @@ func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, voteR
 	askvoteHelper(port, voteRequestResultBuffer, client)
 
 	// wait for quorum check
-	check := <-electionHolder
-	if !check.state {
+	checkElection := <-electionHolder
+	if !checkElection.state {
 		return
 	}
 	// proceed, send new epoch
-	newepochHelper(port, check, ackeResultBuffer, client)
+	newepochHelper(port, checkElection, ackeResultBuffer, client)
+
+	// wait for quorum check
+	checkSynchronization := <-synchronizationHolder
+	if !checkSynchronization.state {
+		return
+	}
+	// proceed, TODO:
+	log.Printf("check point")
 }
 
 func askvoteHelper(port string, voteRequestResultBuffer chan stateEpoch, client pb.VoterCandidateClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	r, err := client.AskVote(ctx, &pb.Epoch{Epoch: lastEpochProp})
-	if r != nil {
+	if err != nil {
 		voteRequestResultBuffer <- stateEpoch{false, -1}
 		log.Printf("failed to ask vote from %s: %v", port, err)
 		return
@@ -315,7 +335,7 @@ func newepochHelper(port string, check stateEpoch, ackeResultBuffer chan stateHi
 	ackeResultBuffer <- stateHist{true, hist.GetHist()}
 }
 
-func registerV(port string, cancelDial chan int32) {
+func registerV(port string, cancelDial chan int32, signal chan int32) {
 	// listen port
 	lis, err := net.Listen("tcp", port)
 	if err != nil {
@@ -323,6 +343,7 @@ func registerV(port string, cancelDial chan int32) {
 	}
 	s := grpc.NewServer()
 	pb.RegisterVoterCandidateServer(s, &voterServer{})
+	signal <- 0
 	log.Printf("voter listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)

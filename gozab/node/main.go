@@ -27,6 +27,7 @@ var (
 	serverNum   = 5
 	userPort    = "localhost:50056"
 	serverPorts = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
+	serverMap   = map[string]int32{"localhost:50051": 0, "localhost:50052": 1, "localhost:50053": 2, "localhost:50054": 3, "localhost:50055": 4}
 
 	propBuffers   [5]chan *pb.PropTxn
 	commitBuffers [5]chan *pb.CommitTxn
@@ -49,9 +50,8 @@ var (
 	pStorage []*pb.PropTxn
 	dStruct  map[string]int32
 
-	voted                   chan int32
-	voteRequestResultBuffer chan stateEpoch // size 5 buffer
-	currentLeader           string          // change all the for loops
+	voted         chan int32
+	currentLeader string // change all the for loops
 )
 
 type leaderServer struct {
@@ -80,21 +80,23 @@ func main() {
 	archive = make([]*pb.PropTxn, 0)
 	pStorage = make([]*pb.PropTxn, 0) // TODO: merge current pStorage into archive and declare new pStorage
 	dStruct = make(map[string]int32)
-	if os.Args[1] == "lead" {
-		LeaderRoutine(os.Args[2])
-	} else if os.Args[1] == "follow" {
-		FollowerRoutine(os.Args[2])
-	}
+	/*
+		if os.Args[1] == "lead" {
+			LeaderRoutine(os.Args[2])
+		} else if os.Args[1] == "follow" {
+			FollowerRoutine(os.Args[2])
+		}
+	*/
 	// default: election
 	log.Printf("entering election...")
 	mainHolder := make(chan int) // prevent main from exiting
-	ElectionRoutine(os.Args[2])
+	ElectionRoutine(os.Args[2], serverMap[os.Args[2]])
 	<-mainHolder
 }
 
 // Leader: implementation of user Store handler
 func (s *leaderServer) Store(ctx context.Context, in *pb.Vec) (*pb.Empty, error) {
-	log.Printf("Leader received user request\n")
+	log.Printf("Leader received user request")
 	for i := 0; i < serverNum; i++ {
 		propBuffers[i] <- &pb.PropTxn{E: lastEpoch, Transaction: &pb.Txn{V: &pb.Vec{Key: in.GetKey(), Value: in.GetValue()}, Z: &pb.Zxid{Epoch: lastEpoch, Counter: lastCount}}}
 	}
@@ -104,7 +106,7 @@ func (s *leaderServer) Store(ctx context.Context, in *pb.Vec) (*pb.Empty, error)
 
 // Leader: implementation of user Retrieve handler
 func (s *leaderServer) Retrieve(ctx context.Context, in *pb.GetTxn) (*pb.ResultTxn, error) {
-	log.Printf("Leader received user retrieve\n")
+	log.Printf("Leader received user retrieve")
 	return &pb.ResultTxn{Value: dStruct[in.GetKey()]}, nil
 }
 
@@ -149,11 +151,13 @@ func registerL() {
 
 // Voter: implementation of AskVote handler
 func (s *voterServer) AskVote(ctx context.Context, in *pb.Epoch) (*pb.Vote, error) {
-	log.Printf("Leader received user retrieve\n")
+	log.Printf("Voter received candidate vote request")
 	select {
 	case <-voted:
+		log.Printf("not voted yet, now vote")
 		return &pb.Vote{Voted: true}, nil
 	default:
+		log.Printf("voted, do not vote")
 		return &pb.Vote{Voted: false}, nil
 	}
 
@@ -171,32 +175,35 @@ func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.ACK_E, er
 	return &pb.ACK_E{LastLeaderProp: lastLeaderProp, Hist: pStorage}, nil
 }
 
-func ElectionRoutine(port string) {
-	voted = make(chan int32)
+func ElectionRoutine(port string, serial int32) {
+	log.Printf("election routine entered")
+	voted = make(chan int32, 1)
 	voted <- 0
-	go registerV(port)
+	cancelDial := make(chan int32, 1)
+	go registerV(port, cancelDial)
 
 	rand.Seed(time.Now().UnixNano())
-	n := rand.Intn(10) // n will be between 0 and 10
-
+	n := rand.Intn(10)*50 + 10 // n will be between 10 and 20
+	log.Printf("entering random sleep...")
 	time.Sleep(time.Duration(n) * time.Millisecond)
+	log.Printf("woke up: %v", time.Duration(n)*time.Millisecond)
 	// time to check
 	select {
 	// didn't receive request, try to be leader
 	case <-voted:
-
+		log.Printf("voted to my self")
 		// initialize routines
 		voteCount := 0
 		ackeCount := 0
-		voteRequestResultBuffer = make(chan stateEpoch, 5)
 		electionHolder := make(chan stateEpoch, 5)
+		voteRequestResultBuffer := make(chan stateEpoch, 5)
 		synchronizationHolder := make(chan stateHist, 5)
 		ackeResultBuffer := make(chan stateHist, 5)
-		go ElectionMessengerRoutine(serverPorts[0], electionHolder, synchronizationHolder, ackeResultBuffer)
-		go ElectionMessengerRoutine(serverPorts[1], electionHolder, synchronizationHolder, ackeResultBuffer)
-		go ElectionMessengerRoutine(serverPorts[2], electionHolder, synchronizationHolder, ackeResultBuffer)
-		go ElectionMessengerRoutine(serverPorts[3], electionHolder, synchronizationHolder, ackeResultBuffer)
-		go ElectionMessengerRoutine(serverPorts[4], electionHolder, synchronizationHolder, ackeResultBuffer)
+		for i := 0; i < 5; i++ {
+			if int32(i) != serial {
+				go ElectionMessengerRoutine(serverPorts[i], electionHolder, voteRequestResultBuffer, synchronizationHolder, ackeResultBuffer)
+			}
+		}
 
 		// check vote request results
 		var latestE int32 = -1
@@ -215,7 +222,8 @@ func ElectionRoutine(port string) {
 			for i := 0; i < 5; i++ {
 				electionHolder <- stateEpoch{false, -1}
 			}
-			go ElectionRoutine(port)
+			cancelDial <- 0
+			go ElectionRoutine(port, serial)
 			return
 		} else {
 			// let ElectionMessengerRoutines proceed
@@ -230,17 +238,17 @@ func ElectionRoutine(port string) {
 			result := <-ackeResultBuffer
 			if result.state {
 				ackeCount++
-				if result.hist[len(result.hist)-1].E > latestHist[len(latestHist)].E || result.hist[len(result.hist)-1].E == latestHist[len(latestHist)].E && result.hist[len(result.hist)-1].Transaction.Z.Counter >= latestHist[len(latestHist)].Transaction.Z.Counter {
+				if result.hist[len(result.hist)-1].E > latestHist[len(latestHist)-1].E || result.hist[len(result.hist)-1].E == latestHist[len(latestHist)-1].E && result.hist[len(result.hist)-1].Transaction.Z.Counter >= latestHist[len(latestHist)-1].Transaction.Z.Counter {
 					latestHist = result.hist
 				}
 			}
 		}
 		if ackeCount <= serverNum/2 {
-			// restart election
+			// cancel ElectionMessengerRoutine, restart election
 			for i := 0; i < 5; i++ {
 				synchronizationHolder <- stateHist{false, []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}}
 			}
-			go ElectionRoutine(port)
+			go ElectionRoutine(port, serial)
 			return
 		} else {
 			// let ElectionMessengerRoutines proceed
@@ -251,13 +259,15 @@ func ElectionRoutine(port string) {
 
 		// become prospective leader
 		// TODO: synchronization
+		log.Printf("entering synchronization as prospective leader...")
 	default:
 		// become follower
 		// TODO: synchronization
+		log.Printf("entering synchronization as follower...")
 	}
 }
 
-func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, synchronizationHolder chan stateHist, ackeResultBuffer chan stateHist) {
+func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, voteRequestResultBuffer chan stateEpoch, synchronizationHolder chan stateHist, ackeResultBuffer chan stateHist) {
 	// dial and askvote
 	conn, err := grpc.Dial(port, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -267,7 +277,7 @@ func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, synch
 
 	client := pb.NewVoterCandidateClient(conn)
 
-	askvoteHelper(port, client)
+	askvoteHelper(port, voteRequestResultBuffer, client)
 
 	// wait for quorum check
 	check := <-electionHolder
@@ -278,7 +288,7 @@ func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, synch
 	newepochHelper(port, check, ackeResultBuffer, client)
 }
 
-func askvoteHelper(port string, client pb.VoterCandidateClient) {
+func askvoteHelper(port string, voteRequestResultBuffer chan stateEpoch, client pb.VoterCandidateClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	r, err := client.AskVote(ctx, &pb.Epoch{Epoch: lastEpochProp})
@@ -305,7 +315,7 @@ func newepochHelper(port string, check stateEpoch, ackeResultBuffer chan stateHi
 	ackeResultBuffer <- stateHist{true, hist.GetHist()}
 }
 
-func registerV(port string) {
+func registerV(port string, cancelDial chan int32) {
 	// listen port
 	lis, err := net.Listen("tcp", port)
 	if err != nil {
@@ -317,23 +327,26 @@ func registerV(port string) {
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
+	<-cancelDial
+	lis.Close()
+	s.Stop()
 }
 
 // Follower: implementation of Broadcast handler
 func (s *followerServer) Broadcast(ctx context.Context, in *pb.PropTxn) (*pb.AckTxn, error) {
-	log.Printf("Follower received proposal\n")
+	log.Printf("Follower received proposa")
 	// writes the proposal to local stable storage
 	pStorage = append(pStorage, in)
-	log.Printf("local stable storage: %+v\n", pStorage)
+	log.Printf("local stable storage: %+v", pStorage)
 	return &pb.AckTxn{Content: "I Acknowledged"}, nil
 }
 
 // Follower: implementation of Commit handler
 func (s *followerServer) Commit(ctx context.Context, in *pb.CommitTxn) (*pb.Empty, error) {
-	log.Printf("Follower received commit\n")
+	log.Printf("Follower received commit")
 	// writes the transaction from local stable storage to local data structure
 	dStruct[pStorage[len(pStorage)-1].Transaction.V.Key] = pStorage[len(pStorage)-1].Transaction.V.Value
-	log.Printf("local data structure: %+v\n", dStruct)
+	log.Printf("local data structure: %+v", dStruct)
 	return &pb.Empty{Content: "Commit message recieved"}, nil
 }
 

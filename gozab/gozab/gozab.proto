@@ -22,11 +22,12 @@ service VoterCandidate {
     rpc AskVote (Epoch) returns (Vote) {}
     rpc NewEpoch (Epoch) returns (EpochHist) {}
     rpc NewLeader (EpochHist) returns (Vote) {}
+    rpc CommitNewLeader (Empty) returns (Empty) {}
 }
 
 // used as ACK_E and parameters of NEWLEADER()
 message EpochHist {
-    int32 lastLeaderProp = 1;
+    int32 Epoch = 1;
     repeated PropTxn hist = 2;
 }
 

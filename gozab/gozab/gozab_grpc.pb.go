@@ -305,6 +305,7 @@ type VoterCandidateClient interface {
 	AskVote(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*Vote, error)
 	NewEpoch(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*EpochHist, error)
 	NewLeader(ctx context.Context, in *EpochHist, opts ...grpc.CallOption) (*Vote, error)
+	CommitNewLeader(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
 }
 
 type voterCandidateClient struct {
@@ -342,6 +343,15 @@ func (c *voterCandidateClient) NewLeader(ctx context.Context, in *EpochHist, opt
 	return out, nil
 }
 
+func (c *voterCandidateClient) CommitNewLeader(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error) {
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, "/gozab.VoterCandidate/CommitNewLeader", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // VoterCandidateServer is the server API for VoterCandidate service.
 // All implementations must embed UnimplementedVoterCandidateServer
 // for forward compatibility
@@ -349,6 +359,7 @@ type VoterCandidateServer interface {
 	AskVote(context.Context, *Epoch) (*Vote, error)
 	NewEpoch(context.Context, *Epoch) (*EpochHist, error)
 	NewLeader(context.Context, *EpochHist) (*Vote, error)
+	CommitNewLeader(context.Context, *Empty) (*Empty, error)
 	mustEmbedUnimplementedVoterCandidateServer()
 }
 
@@ -364,6 +375,9 @@ func (UnimplementedVoterCandidateServer) NewEpoch(context.Context, *Epoch) (*Epo
 }
 func (UnimplementedVoterCandidateServer) NewLeader(context.Context, *EpochHist) (*Vote, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NewLeader not implemented")
+}
+func (UnimplementedVoterCandidateServer) CommitNewLeader(context.Context, *Empty) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CommitNewLeader not implemented")
 }
 func (UnimplementedVoterCandidateServer) mustEmbedUnimplementedVoterCandidateServer() {}
 
@@ -432,6 +446,24 @@ func _VoterCandidate_NewLeader_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _VoterCandidate_CommitNewLeader_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VoterCandidateServer).CommitNewLeader(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gozab.VoterCandidate/CommitNewLeader",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VoterCandidateServer).CommitNewLeader(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // VoterCandidate_ServiceDesc is the grpc.ServiceDesc for VoterCandidate service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -450,6 +482,10 @@ var VoterCandidate_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "NewLeader",
 			Handler:    _VoterCandidate_NewLeader_Handler,
+		},
+		{
+			MethodName: "CommitNewLeader",
+			Handler:    _VoterCandidate_CommitNewLeader_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

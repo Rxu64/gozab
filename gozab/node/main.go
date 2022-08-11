@@ -163,14 +163,14 @@ func (s *voterServer) AskVote(ctx context.Context, in *pb.Epoch) (*pb.Vote, erro
 
 }
 
-// Voter: implementation of ACK-E handler
+// Voter: implementation of NewEpoch handler
 func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.ACK_E, error) {
 	// check new epoch
 	if lastEpochProp >= in.GetEpoch() {
 		return nil, status.Errorf(codes.InvalidArgument,
 			"new epoch not new enough")
 	}
-
+	lastEpochProp = in.GetEpoch()
 	// acknowledge new epoch proposal
 	return &pb.ACK_E{LastLeaderProp: lastLeaderProp, Hist: pStorage}, nil
 }
@@ -246,7 +246,7 @@ func ElectionRoutine(port string, serial int32) {
 				log.Printf("valid ACK-E")
 				ackeCount++
 				if len(result.hist) == 0 { // system startup, no history yet
-					latestHist = nil
+					latestHist = make([]*pb.PropTxn, 0)
 				} else if result.hist[len(result.hist)-1].E > latestHist[len(latestHist)-1].E || result.hist[len(result.hist)-1].E == latestHist[len(latestHist)-1].E && result.hist[len(result.hist)-1].Transaction.Z.Counter >= latestHist[len(latestHist)-1].Transaction.Z.Counter {
 					latestHist = result.hist
 				}

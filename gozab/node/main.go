@@ -46,12 +46,12 @@ var (
 	lastEpochProp  int32 = 0
 	lastLeaderProp int32 = 0
 
-	archive  []*pb.PropTxn
 	pStorage []*pb.PropTxn
 	dStruct  map[string]int32
 
-	voted         chan int32
-	currentLeader string // change all the for loops
+	voted          chan int32
+	followerHolder chan bool
+	currentLeader  string // change all the for loops
 )
 
 type leaderServer struct {
@@ -77,8 +77,7 @@ type stateHist struct {
 }
 
 func main() {
-	archive = make([]*pb.PropTxn, 0)
-	pStorage = make([]*pb.PropTxn, 0) // TODO: merge current pStorage into archive and declare new pStorage
+	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
 	/*
 		if os.Args[1] == "lead" {
@@ -177,8 +176,19 @@ func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.EpochHist
 
 // Voter: implementation of NEWLEADER handler
 func (s *voterServer) NewLeader(ctx context.Context, in *pb.EpochHist) (*pb.Vote, error) {
-	// TODO: implement this handler
-	return nil, nil
+	// check new leader's epoch
+	if in.GetEpoch() != lastEpochProp {
+		followerHolder <- false
+		return &pb.Vote{Voted: false}, nil
+	}
+	// update last leader and pStorage
+	lastLeaderProp = in.GetEpoch()
+	pStorage = in.GetHist()
+	for _, v := range pStorage {
+		v.E = in.GetEpoch()
+	}
+	// acknowledge NEWLEADER proposal
+	return &pb.Vote{Voted: true}, nil
 }
 
 // Voter: implementation of CommitNewLeader handler
@@ -212,6 +222,7 @@ func ElectionRoutine(port string, serial int32) {
 		voteRequestResultBuffer := make(chan stateEpoch, 4)
 		synchronizationHolder := make(chan stateHist, 4)
 		ackeResultBuffer := make(chan stateHist, 4)
+		// TODO: initialize a holder
 		ackldResultBuffer := make(chan bool, 4)
 		for i := 0; i < 5; i++ {
 			if int32(i) != serial {
@@ -285,6 +296,7 @@ func ElectionRoutine(port string, serial int32) {
 		// become prospective leader
 
 		// check NEWLEADER ack results
+		log.Printf("checking NEWLEADER ack results...")
 		ackldCount := 0
 		for i := 0; i < 4; i++ {
 			result := <-ackldResultBuffer
@@ -298,15 +310,26 @@ func ElectionRoutine(port string, serial int32) {
 			cancelDial <- 0
 			go ElectionRoutine(port, serial)
 			return
+		} else {
+			// let ElectionMessengerRoutines proceed
+			log.Printf("lifting commit holder...")
+			for i := 0; i < 4; i++ {
+				// TODO: let the messenger routine to proceed to commit new leader
+			}
 		}
-
-		// TODO: let the messenger routine to proceed to commit new leader
 
 		// HERE, I'm an established leader
 
 		log.Printf("proceed to phase 3 as an estabilished leader...")
 		// TODO: continue as a leader, proceed to phase 3
 	default:
+		r := <-followerHolder
+		if !r {
+			// restart election
+			cancelDial <- 0
+			go ElectionRoutine(port, serial)
+			return
+		}
 		// become follower
 		// TODO: proceed as a follower
 		// 		 IMPORTANT: need a channel in some voter handler to hold here before confirming the leader established
@@ -345,7 +368,6 @@ func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, voteR
 	if !checkSynchronization.state {
 		return
 	}
-
 	// proceed, propose new leader
 	r = newleaderHelper(port, checkSynchronization.hist, ackldResultBuffer, client)
 	if !r {

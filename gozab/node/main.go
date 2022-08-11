@@ -164,7 +164,7 @@ func (s *voterServer) AskVote(ctx context.Context, in *pb.Epoch) (*pb.Vote, erro
 }
 
 // Voter: implementation of NewEpoch handler
-func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.ACK_E, error) {
+func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.EpochHist, error) {
 	// check new epoch
 	if lastEpochProp >= in.GetEpoch() {
 		return nil, status.Errorf(codes.InvalidArgument,
@@ -172,7 +172,7 @@ func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.ACK_E, er
 	}
 	lastEpochProp = in.GetEpoch()
 	// acknowledge new epoch proposal
-	return &pb.ACK_E{LastLeaderProp: lastLeaderProp, Hist: pStorage}, nil
+	return &pb.EpochHist{LastLeaderProp: lastLeaderProp, Hist: pStorage}, nil
 }
 
 func ElectionRoutine(port string, serial int32) {

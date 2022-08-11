@@ -163,7 +163,7 @@ func (s *voterServer) AskVote(ctx context.Context, in *pb.Epoch) (*pb.Vote, erro
 
 }
 
-// Voter: implementation of NewEpoch handler
+// Voter: implementation of NEWEPOCH handler
 func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.EpochHist, error) {
 	// check new epoch
 	if lastEpochProp >= in.GetEpoch() {
@@ -173,6 +173,18 @@ func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.EpochHist
 	lastEpochProp = in.GetEpoch()
 	// acknowledge new epoch proposal
 	return &pb.EpochHist{Epoch: lastLeaderProp, Hist: pStorage}, nil
+}
+
+// Voter: implementation of NEWLEADER handler
+func (s *voterServer) NewLeader(ctx context.Context, in *pb.EpochHist) (*pb.Vote, error) {
+	// TODO: implement this handler
+	return nil, nil
+}
+
+// Voter: implementation of CommitNewLeader handler
+func (s *voterServer) CommitNewLeader(ctx context.Context, in *pb.Empty) (*pb.Empty, error) {
+	// TODO: implement this handler
+	return nil, nil
 }
 
 func ElectionRoutine(port string, serial int32) {
@@ -288,9 +300,12 @@ func ElectionRoutine(port string, serial int32) {
 			return
 		}
 
+		// TODO: let the messenger routine to proceed to commit new leader
+
 		// HERE, I'm an established leader
 
 		log.Printf("proceed to phase 3 as an estabilished leader...")
+		// TODO: continue as a leader, proceed to phase 3
 	default:
 		// become follower
 		// TODO: proceed as a follower
@@ -337,8 +352,7 @@ func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, voteR
 		return
 	}
 
-	// TODO: check if new leader established?
-	//		 need more code in messenger??
+	// TODO: proceed to sending new leader commit to followers
 }
 
 func newleaderHelper(port string, latestHist []*pb.PropTxn, ackldResultBuffer chan bool, client pb.VoterCandidateClient) bool {

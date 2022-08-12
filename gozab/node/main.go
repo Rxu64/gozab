@@ -42,7 +42,6 @@ var (
 	lastCount int32 = 0
 
 	// for follower use
-	// TODO: remember to update these
 	lastEpochProp  int32 = 0
 	lastLeaderProp int32 = 0
 
@@ -192,10 +191,12 @@ func (s *voterServer) NewLeader(ctx context.Context, in *pb.EpochHist) (*pb.Vote
 
 // Voter: implementation of CommitNewLeader handler
 func (s *voterServer) CommitNewLeader(ctx context.Context, in *pb.Empty) (*pb.Empty, error) {
-	// simply update lastLeaderProp
-	lastLeaderProp = lastEpochProp
-	// TODO: update dStruct (abdeliver) here
-	// THINK: maybe lift the followerHolder with true here?
+	// update dStruct
+	for _, v := range pStorage {
+		dStruct[v.Transaction.V.Key] = v.Transaction.V.Value
+	}
+	// TODO: add epoch num to commit messages, if not match lift holder with false
+	followerHolder <- true
 
 	return &pb.Empty{}, nil
 }
@@ -219,14 +220,11 @@ func ElectionRoutine(port string, serial int32) {
 	case <-voted:
 		log.Printf("voted to my self")
 		// initialize routines
-		voteCount := 0
-		ackeCount := 0
 		electionHolder := make(chan stateEpoch, 4)
 		voteRequestResultBuffer := make(chan stateEpoch, 4)
 		synchronizationHolder := make(chan stateHist, 4)
 		ackeResultBuffer := make(chan stateHist, 4)
 		commitldHolder := make(chan bool, 4)
-		// TODO: initialize a holder
 		ackldResultBuffer := make(chan bool, 4)
 		for i := 0; i < 5; i++ {
 			if int32(i) != serial {
@@ -234,8 +232,8 @@ func ElectionRoutine(port string, serial int32) {
 			}
 		}
 
-		// check vote request results
 		log.Printf("checking vote request results...")
+		voteCount := 0
 		var latestE int32 = -1
 		for i := 0; i < 4; i++ {
 			result := <-voteRequestResultBuffer
@@ -249,7 +247,6 @@ func ElectionRoutine(port string, serial int32) {
 		}
 		lastEpoch = latestE + 1
 		if voteCount <= serverNum/2 {
-			// cancel ElectionMessengerRoutine, restart election
 			log.Printf("restarting election...")
 			for i := 0; i < 4; i++ {
 				electionHolder <- stateEpoch{false, -1}
@@ -258,7 +255,6 @@ func ElectionRoutine(port string, serial int32) {
 			go ElectionRoutine(port, serial)
 			return
 		} else {
-			// let ElectionMessengerRoutines proceed
 			log.Printf("lifting election holder...")
 			for i := 0; i < 4; i++ {
 				electionHolder <- stateEpoch{true, lastEpoch}
@@ -267,6 +263,7 @@ func ElectionRoutine(port string, serial int32) {
 
 		// check ACK-E results
 		log.Printf("checking ACK-E results...")
+		ackeCount := 0
 		var latestHist = []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}
 		for i := 0; i < 4; i++ {
 			result := <-ackeResultBuffer
@@ -281,7 +278,6 @@ func ElectionRoutine(port string, serial int32) {
 			}
 		}
 		if ackeCount <= serverNum/2 {
-			// cancel ElectionMessengerRoutine, restart election
 			log.Printf("restarting election...")
 			for i := 0; i < 4; i++ {
 				synchronizationHolder <- stateHist{false, []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}}
@@ -290,14 +286,13 @@ func ElectionRoutine(port string, serial int32) {
 			go ElectionRoutine(port, serial)
 			return
 		} else {
-			// let ElectionMessengerRoutines proceed
 			log.Printf("lifting synchronization holder...")
 			for i := 0; i < 4; i++ {
 				synchronizationHolder <- stateHist{true, latestHist}
 			}
 		}
 
-		// become prospective leader
+		// became prospective leader
 
 		// check NEWLEADER ack results
 		log.Printf("checking NEWLEADER ack results...")
@@ -311,24 +306,23 @@ func ElectionRoutine(port string, serial int32) {
 		}
 		if ackldCount <= serverNum/2 {
 			log.Printf("restarting election...")
-			cancelListen <- 0
 			for i := 0; i < 4; i++ {
 				commitldHolder <- false
 			}
+			cancelListen <- 0
 			go ElectionRoutine(port, serial)
 			return
 		} else {
-			// let ElectionMessengerRoutines proceed
 			log.Printf("lifting commit holder...")
 			for i := 0; i < 4; i++ {
 				commitldHolder <- true
 			}
 		}
 
-		// HERE, I'm an established leader
+		// became established leader
 
 		log.Printf("proceed to phase 3 as an estabilished leader...")
-		// TODO: continue as a leader, proceed to phase 3
+		// TODO: proceed as a leader
 	default:
 		r := <-followerHolder
 		if !r {
@@ -337,10 +331,11 @@ func ElectionRoutine(port string, serial int32) {
 			go ElectionRoutine(port, serial)
 			return
 		}
-		// become follower
-		// TODO: proceed as a follower
-		// 		 IMPORTANT: need a channel in some voter handler to hold here before confirming the leader established
+
+		// became follower
+
 		log.Printf("proceed to phase 3 as a follower")
+		// TODO: proceed as a follower
 	}
 }
 
@@ -354,39 +349,32 @@ func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, voteR
 
 	client := pb.NewVoterCandidateClient(conn)
 
-	r := askvoteHelper(port, voteRequestResultBuffer, client)
-	if !r {
+	if !askvoteHelper(port, voteRequestResultBuffer, client) {
 		return
 	}
 
-	// wait for quorum check
+	// wait for quorum check and send new epoch
 	checkElection := <-electionHolder
 	if !checkElection.state {
 		return
 	}
-	// proceed, send new epoch
-	r = newepochHelper(port, checkElection, ackeResultBuffer, client)
-	if !r {
+	if !newepochHelper(port, checkElection.epoch, ackeResultBuffer, client) {
 		return
 	}
 
-	// wait for quorum check
+	// wait for quorum check and propose new leader
 	checkSynchronization := <-synchronizationHolder
 	if !checkSynchronization.state {
 		return
 	}
-	// proceed, propose new leader
-	r = newleaderHelper(port, checkSynchronization.hist, ackldResultBuffer, client)
-	if !r {
+	if !newleaderHelper(port, checkSynchronization.hist, ackldResultBuffer, client) {
 		return
 	}
 
-	// wait for quorum check
-	checkAckld := <-commitldHolder
-	if !checkAckld {
+	// wait for quorum check and commit new leader
+	if !<-commitldHolder {
 		return
 	}
-	// proceed, commit new leader
 	commitldHelper(port, client)
 }
 
@@ -438,10 +426,10 @@ func askvoteHelper(port string, voteRequestResultBuffer chan stateEpoch, client 
 	return true
 }
 
-func newepochHelper(port string, check stateEpoch, ackeResultBuffer chan stateHist, client pb.VoterCandidateClient) bool {
+func newepochHelper(port string, epoch int32, ackeResultBuffer chan stateHist, client pb.VoterCandidateClient) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	hist, err := client.NewEpoch(ctx, &pb.Epoch{Epoch: check.epoch})
+	hist, err := client.NewEpoch(ctx, &pb.Epoch{Epoch: epoch})
 	if err != nil {
 		// this messenger is dead
 		ackeResultBuffer <- stateHist{false, nil}

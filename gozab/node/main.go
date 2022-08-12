@@ -51,7 +51,6 @@ var (
 
 	voted          chan int32
 	followerHolder chan bool
-	currentLeader  string // change all the for loops
 )
 
 type leaderServer struct {
@@ -193,17 +192,21 @@ func (s *voterServer) NewLeader(ctx context.Context, in *pb.EpochHist) (*pb.Vote
 
 // Voter: implementation of CommitNewLeader handler
 func (s *voterServer) CommitNewLeader(ctx context.Context, in *pb.Empty) (*pb.Empty, error) {
-	// TODO: implement this handler
-	return nil, nil
+	// simply update lastLeaderProp
+	lastLeaderProp = lastEpochProp
+	// TODO: update dStruct (abdeliver) here
+	// THINK: maybe lift the followerHolder with true here?
+
+	return &pb.Empty{}, nil
 }
 
 func ElectionRoutine(port string, serial int32) {
 	log.Printf("election routine entered")
 	voted = make(chan int32, 1)
 	voted <- 0
-	cancelDial := make(chan int32, 1)
+	cancelListen := make(chan int32, 1)
 	signal := make(chan int32, 1)
-	go registerV(port, cancelDial, signal)
+	go registerV(port, cancelListen, signal)
 	<-signal
 	rand.Seed(time.Now().UnixNano())
 	n := rand.Intn(10)*100 + 600 // n will be between 600 and 1500
@@ -222,11 +225,12 @@ func ElectionRoutine(port string, serial int32) {
 		voteRequestResultBuffer := make(chan stateEpoch, 4)
 		synchronizationHolder := make(chan stateHist, 4)
 		ackeResultBuffer := make(chan stateHist, 4)
+		commitldHolder := make(chan bool, 4)
 		// TODO: initialize a holder
 		ackldResultBuffer := make(chan bool, 4)
 		for i := 0; i < 5; i++ {
 			if int32(i) != serial {
-				go ElectionMessengerRoutine(serverPorts[i], electionHolder, voteRequestResultBuffer, synchronizationHolder, ackeResultBuffer, ackldResultBuffer)
+				go ElectionMessengerRoutine(serverPorts[i], electionHolder, voteRequestResultBuffer, synchronizationHolder, ackeResultBuffer, ackldResultBuffer, commitldHolder)
 			}
 		}
 
@@ -250,7 +254,7 @@ func ElectionRoutine(port string, serial int32) {
 			for i := 0; i < 4; i++ {
 				electionHolder <- stateEpoch{false, -1}
 			}
-			cancelDial <- 0
+			cancelListen <- 0
 			go ElectionRoutine(port, serial)
 			return
 		} else {
@@ -282,7 +286,7 @@ func ElectionRoutine(port string, serial int32) {
 			for i := 0; i < 4; i++ {
 				synchronizationHolder <- stateHist{false, []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}}
 			}
-			cancelDial <- 0
+			cancelListen <- 0
 			go ElectionRoutine(port, serial)
 			return
 		} else {
@@ -307,14 +311,17 @@ func ElectionRoutine(port string, serial int32) {
 		}
 		if ackldCount <= serverNum/2 {
 			log.Printf("restarting election...")
-			cancelDial <- 0
+			cancelListen <- 0
+			for i := 0; i < 4; i++ {
+				commitldHolder <- false
+			}
 			go ElectionRoutine(port, serial)
 			return
 		} else {
 			// let ElectionMessengerRoutines proceed
 			log.Printf("lifting commit holder...")
 			for i := 0; i < 4; i++ {
-				// TODO: let the messenger routine to proceed to commit new leader
+				commitldHolder <- true
 			}
 		}
 
@@ -326,7 +333,7 @@ func ElectionRoutine(port string, serial int32) {
 		r := <-followerHolder
 		if !r {
 			// restart election
-			cancelDial <- 0
+			cancelListen <- 0
 			go ElectionRoutine(port, serial)
 			return
 		}
@@ -337,7 +344,7 @@ func ElectionRoutine(port string, serial int32) {
 	}
 }
 
-func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, voteRequestResultBuffer chan stateEpoch, synchronizationHolder chan stateHist, ackeResultBuffer chan stateHist, ackldResultBuffer chan bool) {
+func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, voteRequestResultBuffer chan stateEpoch, synchronizationHolder chan stateHist, ackeResultBuffer chan stateHist, ackldResultBuffer chan bool, commitldHolder chan bool) {
 	// dial and askvote
 	conn, err := grpc.Dial(port, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -374,7 +381,13 @@ func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, voteR
 		return
 	}
 
-	// TODO: proceed to sending new leader commit to followers
+	// wait for quorum check
+	checkAckld := <-commitldHolder
+	if !checkAckld {
+		return
+	}
+	// proceed, commit new leader
+	commitldHelper(port, client)
 }
 
 func newleaderHelper(port string, latestHist []*pb.PropTxn, ackldResultBuffer chan bool, client pb.VoterCandidateClient) bool {
@@ -393,6 +406,17 @@ func newleaderHelper(port string, latestHist []*pb.PropTxn, ackldResultBuffer ch
 		return false
 	}
 	ackldResultBuffer <- true
+	return true
+}
+
+func commitldHelper(port string, client pb.VoterCandidateClient) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := client.CommitNewLeader(ctx, &pb.Empty{})
+	if err != nil {
+		log.Printf("failed to send Commit-LD to %s: %v", port, err)
+		return false
+	}
 	return true
 }
 
@@ -428,7 +452,7 @@ func newepochHelper(port string, check stateEpoch, ackeResultBuffer chan stateHi
 	return true
 }
 
-func registerV(port string, cancelDial chan int32, signal chan int32) {
+func registerV(port string, cancelListen chan int32, signal chan int32) {
 	// listen port
 	lis, err := net.Listen("tcp", port)
 	if err != nil {
@@ -441,7 +465,7 @@ func registerV(port string, cancelDial chan int32, signal chan int32) {
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
-	<-cancelDial
+	<-cancelListen
 	lis.Close()
 	s.Stop()
 }

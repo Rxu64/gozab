@@ -79,14 +79,6 @@ type stateHist struct {
 }
 
 func main() {
-	// register server
-	vs = grpc.NewServer()
-	pb.RegisterVoterCandidateServer(vs, &voterServer{})
-	ls = grpc.NewServer()
-	pb.RegisterLeaderUserServer(ls, &leaderServer{})
-	fs = grpc.NewServer()
-	pb.RegisterFollowerLeaderServer(fs, &followerServer{})
-
 	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
 	port := os.Args[1]
@@ -136,13 +128,7 @@ func LeaderRoutine(port string) string {
 
 	go AckToCmtRoutine()
 
-	// listen user
-	lis, err := net.Listen("tcp", userPort)
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-	log.Printf("leader listening at %v", lis.Addr())
-	go serveL(lis)
+	go serveL()
 
 	<-messengerStat
 	log.Printf("quorum dead")
@@ -150,7 +136,15 @@ func LeaderRoutine(port string) string {
 	return "elect"
 }
 
-func serveL(lis net.Listener) {
+func serveL() {
+	// listen user
+	lis, err := net.Listen("tcp", userPort)
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	log.Printf("leader listening at %v", lis.Addr())
+	ls = grpc.NewServer()
+	pb.RegisterLeaderUserServer(ls, &leaderServer{})
 	if err := ls.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
@@ -224,13 +218,7 @@ func ElectionRoutine(port string, serial int32) string {
 
 	sleepHolder := make(chan int32, 1)
 
-	// listen port
-	lis, err := net.Listen("tcp", port)
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-	log.Printf("voter listening at %v", lis.Addr())
-	go serveV(port, lis, sleepHolder)
+	go serveV(port, sleepHolder)
 
 	<-sleepHolder // make sure service established before go to sleep
 
@@ -269,7 +257,8 @@ func ElectionRoutine(port string, serial int32) string {
 
 		log.Printf("checking vote request results...")
 		var latestE int32 = -1
-		for i := 0; i < 4-noreplyCount; i++ { // <-------- TODO: Change this GARBAGE CODE!
+		voteNum := 4 - noreplyCount
+		for i := 0; i < voteNum; i++ {
 			result := <-voteRequestResultBuffer
 			if result.state {
 				log.Printf("valid vote")
@@ -298,7 +287,8 @@ func ElectionRoutine(port string, serial int32) string {
 
 		log.Printf("checking ACK-E results...")
 		var latestHist = []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}
-		for i := 0; i < 4-noreplyCount; i++ {
+		ackeNum := 4 - noreplyCount
+		for i := 0; i < ackeNum; i++ {
 			result := <-ackeResultBuffer
 			if result.state {
 				log.Printf("valid ACK-E")
@@ -328,7 +318,8 @@ func ElectionRoutine(port string, serial int32) string {
 		log.Printf("proceeding to phase 2 as a prospective leader...")
 
 		log.Printf("checking NEWLEADER ack results...")
-		for i := 0; i < 4-noreplyCount; i++ {
+		ackldNum := 4 - noreplyCount
+		for i := 0; i < ackldNum; i++ {
 			result := <-ackldResultBuffer
 			if result {
 				log.Printf("valid ACK-LD")
@@ -477,7 +468,15 @@ func newepochHelper(port string, epoch int32, ackeResultBuffer chan stateHist, c
 	return true
 }
 
-func serveV(port string, lis net.Listener, sleepHolder chan int32) {
+func serveV(port string, sleepHolder chan int32) {
+	// listen port
+	lis, err := net.Listen("tcp", port)
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	log.Printf("voter listening at %v", lis.Addr())
+	vs = grpc.NewServer()
+	pb.RegisterVoterCandidateServer(vs, &voterServer{})
 	sleepHolder <- 0
 	if err := vs.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
@@ -522,13 +521,7 @@ func FollowerRoutine(port string) string {
 	leaderStat := make(chan string)
 	go BeatReceiver(leaderStat)
 
-	// listen leader on port
-	lis, err := net.Listen("tcp", port)
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-	log.Printf("server listening at %v", lis.Addr())
-	go serveF(port, lis)
+	go serveF(port)
 
 	<-leaderStat
 	log.Printf("leader dead")
@@ -536,7 +529,15 @@ func FollowerRoutine(port string) string {
 	return "elect"
 }
 
-func serveF(port string, lis net.Listener) {
+func serveF(port string) {
+	// listen leader on port
+	lis, err := net.Listen("tcp", port)
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	log.Printf("server listening at %v", lis.Addr())
+	fs = grpc.NewServer()
+	pb.RegisterFollowerLeaderServer(fs, &followerServer{})
 	if err := fs.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}

@@ -200,7 +200,12 @@ func (s *voterServer) NewLeader(ctx context.Context, in *pb.EpochHist) (*pb.Vote
 }
 
 // Voter: implementation of CommitNewLeader handler
-func (s *voterServer) CommitNewLeader(ctx context.Context, in *pb.Empty) (*pb.Empty, error) {
+func (s *voterServer) CommitNewLeader(ctx context.Context, in *pb.Epoch) (*pb.Empty, error) {
+
+	if in.GetEpoch() != lastLeaderProp {
+		return &pb.Empty{}, nil // this is simply for prevent delayed delivery of messeges from previous leader
+		// do not need to abort here, simply ignore it
+	}
 	// update dStruct
 	log.Printf("updating dStruct")
 	for _, v := range pStorage {
@@ -264,7 +269,7 @@ func ElectionRoutine(port string, serial int32) string {
 
 		log.Printf("checking vote request results...")
 		var latestE int32 = -1
-		for i := 0; i < 4-noreplyCount; i++ {
+		for i := 0; i < 4-noreplyCount; i++ { // <-------- TODO: Change this GARBAGE CODE!
 			result := <-voteRequestResultBuffer
 			if result.state {
 				log.Printf("valid vote")
@@ -431,7 +436,7 @@ func newleaderHelper(port string, latestHist []*pb.PropTxn, ackldResultBuffer ch
 func commitldHelper(port string, client pb.VoterCandidateClient) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, err := client.CommitNewLeader(ctx, &pb.Empty{})
+	_, err := client.CommitNewLeader(ctx, &pb.Epoch{Epoch: lastEpoch})
 	if err != nil {
 		log.Printf("failed to send Commit-LD to %s: %v", port, err)
 		return false
@@ -481,6 +486,10 @@ func serveV(port string, lis net.Listener, sleepHolder chan int32) {
 
 // Follower: implementation of Broadcast handler
 func (s *followerServer) Broadcast(ctx context.Context, in *pb.PropTxn) (*pb.AckTxn, error) {
+	if in.GetTransaction().GetZ().Epoch != lastLeaderProp {
+		// simply for preventing delayed dilivery from old leader
+		return &pb.AckTxn{Content: "Ignore stale messeges"}, nil
+	}
 	log.Printf("Follower received proposa")
 	// writes the proposal to local stable storage
 	pStorage = append(pStorage, in)
@@ -490,6 +499,10 @@ func (s *followerServer) Broadcast(ctx context.Context, in *pb.PropTxn) (*pb.Ack
 
 // Follower: implementation of Commit handler
 func (s *followerServer) Commit(ctx context.Context, in *pb.CommitTxn) (*pb.Empty, error) {
+	if in.GetEpoch() != lastLeaderProp {
+		// simply for preventing delayed delivery from old leaders
+		return &pb.Empty{Content: "prevent stale messeges"}, nil
+	}
 	log.Printf("Follower received commit")
 	// writes the transaction from local stable storage to local data structure
 	dStruct[pStorage[len(pStorage)-1].Transaction.V.Key] = pStorage[len(pStorage)-1].Transaction.V.Value

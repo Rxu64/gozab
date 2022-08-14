@@ -305,7 +305,7 @@ type VoterCandidateClient interface {
 	AskVote(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*Vote, error)
 	NewEpoch(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*EpochHist, error)
 	NewLeader(ctx context.Context, in *EpochHist, opts ...grpc.CallOption) (*Vote, error)
-	CommitNewLeader(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
+	CommitNewLeader(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*Empty, error)
 }
 
 type voterCandidateClient struct {
@@ -343,7 +343,7 @@ func (c *voterCandidateClient) NewLeader(ctx context.Context, in *EpochHist, opt
 	return out, nil
 }
 
-func (c *voterCandidateClient) CommitNewLeader(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error) {
+func (c *voterCandidateClient) CommitNewLeader(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*Empty, error) {
 	out := new(Empty)
 	err := c.cc.Invoke(ctx, "/gozab.VoterCandidate/CommitNewLeader", in, out, opts...)
 	if err != nil {
@@ -359,7 +359,7 @@ type VoterCandidateServer interface {
 	AskVote(context.Context, *Epoch) (*Vote, error)
 	NewEpoch(context.Context, *Epoch) (*EpochHist, error)
 	NewLeader(context.Context, *EpochHist) (*Vote, error)
-	CommitNewLeader(context.Context, *Empty) (*Empty, error)
+	CommitNewLeader(context.Context, *Epoch) (*Empty, error)
 	mustEmbedUnimplementedVoterCandidateServer()
 }
 
@@ -376,7 +376,7 @@ func (UnimplementedVoterCandidateServer) NewEpoch(context.Context, *Epoch) (*Epo
 func (UnimplementedVoterCandidateServer) NewLeader(context.Context, *EpochHist) (*Vote, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NewLeader not implemented")
 }
-func (UnimplementedVoterCandidateServer) CommitNewLeader(context.Context, *Empty) (*Empty, error) {
+func (UnimplementedVoterCandidateServer) CommitNewLeader(context.Context, *Epoch) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CommitNewLeader not implemented")
 }
 func (UnimplementedVoterCandidateServer) mustEmbedUnimplementedVoterCandidateServer() {}
@@ -447,7 +447,7 @@ func _VoterCandidate_NewLeader_Handler(srv interface{}, ctx context.Context, dec
 }
 
 func _VoterCandidate_CommitNewLeader_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Empty)
+	in := new(Epoch)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -459,7 +459,7 @@ func _VoterCandidate_CommitNewLeader_Handler(srv interface{}, ctx context.Contex
 		FullMethod: "/gozab.VoterCandidate/CommitNewLeader",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(VoterCandidateServer).CommitNewLeader(ctx, req.(*Empty))
+		return srv.(VoterCandidateServer).CommitNewLeader(ctx, req.(*Epoch))
 	}
 	return interceptor(ctx, in, info, handler)
 }

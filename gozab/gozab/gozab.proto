@@ -22,7 +22,7 @@ service VoterCandidate {
     rpc AskVote (Epoch) returns (Vote) {}
     rpc NewEpoch (Epoch) returns (EpochHist) {}
     rpc NewLeader (EpochHist) returns (Vote) {}
-    rpc CommitNewLeader (Empty) returns (Empty) {}
+    rpc CommitNewLeader (Epoch) returns (Empty) {}
 }
 
 // used as ACK_E and parameters of NEWLEADER()
@@ -65,6 +65,7 @@ message AckTxn {
 
 message CommitTxn {
     string content = 1;
+    int32 epoch = 2;
 }
 
 message GetTxn {

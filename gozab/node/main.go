@@ -79,6 +79,14 @@ type stateHist struct {
 }
 
 func main() {
+	// register server
+	vs = grpc.NewServer()
+	pb.RegisterVoterCandidateServer(vs, &voterServer{})
+	ls = grpc.NewServer()
+	pb.RegisterLeaderUserServer(ls, &leaderServer{})
+	fs = grpc.NewServer()
+	pb.RegisterFollowerLeaderServer(fs, &followerServer{})
+
 	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
 	port := os.Args[1]
@@ -128,7 +136,13 @@ func LeaderRoutine(port string) string {
 
 	go AckToCmtRoutine()
 
-	go registerL()
+	// listen user
+	lis, err := net.Listen("tcp", userPort)
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	log.Printf("leader listening at %v", lis.Addr())
+	go serveL(lis)
 
 	<-messengerStat
 	log.Printf("quorum dead")
@@ -136,15 +150,7 @@ func LeaderRoutine(port string) string {
 	return "elect"
 }
 
-func registerL() {
-	// listen user
-	lis, err := net.Listen("tcp", userPort)
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-	ls = grpc.NewServer()
-	pb.RegisterLeaderUserServer(ls, &leaderServer{})
-	log.Printf("leader listening at %v", lis.Addr())
+func serveL(lis net.Listener) {
 	if err := ls.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
@@ -196,6 +202,7 @@ func (s *voterServer) NewLeader(ctx context.Context, in *pb.EpochHist) (*pb.Vote
 // Voter: implementation of CommitNewLeader handler
 func (s *voterServer) CommitNewLeader(ctx context.Context, in *pb.Empty) (*pb.Empty, error) {
 	// update dStruct
+	log.Printf("updating dStruct")
 	for _, v := range pStorage {
 		dStruct[v.Transaction.V.Key] = v.Transaction.V.Value
 	}
@@ -207,10 +214,21 @@ func (s *voterServer) CommitNewLeader(ctx context.Context, in *pb.Empty) (*pb.Em
 
 func ElectionRoutine(port string, serial int32) string {
 	voted = make(chan int32, 1)
+	followerHolder = make(chan bool, 1)
 	voted <- 0
-	signal := make(chan int32, 1)
-	go registerV(port, signal)
-	<-signal // wait for server registration
+
+	sleepHolder := make(chan int32, 1)
+
+	// listen port
+	lis, err := net.Listen("tcp", port)
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	log.Printf("voter listening at %v", lis.Addr())
+	go serveV(port, lis, sleepHolder)
+
+	<-sleepHolder // make sure service established before go to sleep
+
 	rand.Seed(time.Now().UnixNano())
 	n := rand.Intn(10)*100 + 600 // n will be between 600 and 1500
 	log.Printf("entering random sleep...")
@@ -228,27 +246,38 @@ func ElectionRoutine(port string, serial int32) string {
 		ackeResultBuffer := make(chan stateHist, 4)
 		commitldHolder := make(chan bool, 4)
 		ackldResultBuffer := make(chan bool, 4)
+
+		voteHolder := make(chan int32, 4)
+
 		for i := 0; i < 5; i++ {
 			if int32(i) != serial {
-				go ElectionMessengerRoutine(serverPorts[i], electionHolder, voteRequestResultBuffer, synchronizationHolder, ackeResultBuffer, ackldResultBuffer, commitldHolder)
+				go ElectionMessengerRoutine(serverPorts[i], voteHolder, electionHolder, voteRequestResultBuffer, synchronizationHolder, ackeResultBuffer, ackldResultBuffer, commitldHolder)
 			}
 		}
 
-		log.Printf("checking vote request results...")
-		voteCount := 0
-		var latestE int32 = -1
+		// TODO: voteHolder does not solve the problem when two prospective leaders racing each other
 		for i := 0; i < 4; i++ {
+			<-voteHolder // make sure election messenger routines started bofore checking results
+		}
+
+		noreplyCount := 0
+
+		log.Printf("checking vote request results...")
+		var latestE int32 = -1
+		for i := 0; i < 4-noreplyCount; i++ {
 			result := <-voteRequestResultBuffer
 			if result.state {
 				log.Printf("valid vote")
-				voteCount++
 				if result.epoch > latestE {
 					latestE = result.epoch
 				}
+			} else {
+				log.Printf("invalid vote")
+				noreplyCount++
 			}
 		}
 		lastEpoch = latestE + 1
-		if voteCount <= serverNum/2 {
+		if noreplyCount > serverNum/2 {
 			log.Printf("insufficient vote, restarting election...")
 			for i := 0; i < 4; i++ {
 				electionHolder <- stateEpoch{false, -1}
@@ -263,21 +292,21 @@ func ElectionRoutine(port string, serial int32) string {
 		}
 
 		log.Printf("checking ACK-E results...")
-		ackeCount := 0
 		var latestHist = []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}
-		for i := 0; i < 4; i++ {
+		for i := 0; i < 4-noreplyCount; i++ {
 			result := <-ackeResultBuffer
 			if result.state {
 				log.Printf("valid ACK-E")
-				ackeCount++
 				if len(result.hist) == 0 { // system startup, no history yet
 					latestHist = make([]*pb.PropTxn, 0)
 				} else if result.hist[len(result.hist)-1].E > latestHist[len(latestHist)-1].E || result.hist[len(result.hist)-1].E == latestHist[len(latestHist)-1].E && result.hist[len(result.hist)-1].Transaction.Z.Counter >= latestHist[len(latestHist)-1].Transaction.Z.Counter {
 					latestHist = result.hist
 				}
+			} else {
+				noreplyCount++
 			}
 		}
-		if ackeCount <= serverNum/2 {
+		if noreplyCount > serverNum/2 {
 			log.Printf("insufficient acke, restarting election...")
 			for i := 0; i < 4; i++ {
 				synchronizationHolder <- stateHist{false, []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}}
@@ -294,15 +323,15 @@ func ElectionRoutine(port string, serial int32) string {
 		log.Printf("proceeding to phase 2 as a prospective leader...")
 
 		log.Printf("checking NEWLEADER ack results...")
-		ackldCount := 0
-		for i := 0; i < 4; i++ {
+		for i := 0; i < 4-noreplyCount; i++ {
 			result := <-ackldResultBuffer
 			if result {
 				log.Printf("valid ACK-LD")
-				ackldCount++
+			} else {
+				noreplyCount++
 			}
 		}
-		if ackldCount <= serverNum/2 {
+		if noreplyCount > serverNum/2 {
 			log.Printf("insufficient ackld, restarting election...")
 			for i := 0; i < 4; i++ {
 				commitldHolder <- false
@@ -331,7 +360,7 @@ func ElectionRoutine(port string, serial int32) string {
 			log.Printf("proceeding to phase 3 as a follower...")
 			vs.Stop()
 			return "follow"
-		case <-time.After(5 * time.Second):
+		case <-time.After(10 * time.Second):
 			log.Printf("time out, restarting election...")
 			vs.Stop()
 			return "elect"
@@ -339,13 +368,15 @@ func ElectionRoutine(port string, serial int32) string {
 	}
 }
 
-func ElectionMessengerRoutine(port string, electionHolder chan stateEpoch, voteRequestResultBuffer chan stateEpoch, synchronizationHolder chan stateHist, ackeResultBuffer chan stateHist, ackldResultBuffer chan bool, commitldHolder chan bool) {
+func ElectionMessengerRoutine(port string, voteHolder chan int32, electionHolder chan stateEpoch, voteRequestResultBuffer chan stateEpoch, synchronizationHolder chan stateHist, ackeResultBuffer chan stateHist, ackldResultBuffer chan bool, commitldHolder chan bool) {
 	// dial and askvote
 	conn, err := grpc.Dial(port, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Printf("could not connect to server %s: %v", port, err)
 	}
 	defer conn.Close()
+
+	voteHolder <- 0
 
 	client := pb.NewVoterCandidateClient(conn)
 
@@ -423,6 +454,7 @@ func askvoteHelper(port string, voteRequestResultBuffer chan stateEpoch, client 
 		return false
 	}
 	voteRequestResultBuffer <- stateEpoch{true, lastEpochProp}
+	log.Printf("%s voted me", port)
 	return true
 }
 
@@ -440,16 +472,8 @@ func newepochHelper(port string, epoch int32, ackeResultBuffer chan stateHist, c
 	return true
 }
 
-func registerV(port string, signal chan int32) {
-	// listen port
-	lis, err := net.Listen("tcp", port)
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-	vs = grpc.NewServer()
-	pb.RegisterVoterCandidateServer(vs, &voterServer{})
-	signal <- 0
-	log.Printf("voter listening at %v", lis.Addr())
+func serveV(port string, lis net.Listener, sleepHolder chan int32) {
+	sleepHolder <- 0
 	if err := vs.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
@@ -485,7 +509,13 @@ func FollowerRoutine(port string) string {
 	leaderStat := make(chan string)
 	go BeatReceiver(leaderStat)
 
-	go registerF(port)
+	// listen leader on port
+	lis, err := net.Listen("tcp", port)
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	log.Printf("server listening at %v", lis.Addr())
+	go serveF(port, lis)
 
 	<-leaderStat
 	log.Printf("leader dead")
@@ -493,15 +523,7 @@ func FollowerRoutine(port string) string {
 	return "elect"
 }
 
-func registerF(port string) {
-	// listen leader on port
-	lis, err := net.Listen("tcp", port)
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-	fs = grpc.NewServer()
-	pb.RegisterFollowerLeaderServer(fs, &followerServer{})
-	log.Printf("server listening at %v", lis.Addr())
+func serveF(port string, lis net.Listener) {
 	if err := fs.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
@@ -622,12 +644,14 @@ func cmt(client pb.FollowerLeaderClient, port string, serial int32) {
 }
 
 func BeatSender(client pb.FollowerLeaderClient, followerStat chan string) {
+	time.Sleep(3 * time.Second) // wait for followers to start service
 	for {
 		time.Sleep(100 * time.Millisecond)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_, err := client.HeartBeat(ctx, &pb.Empty{Content: "Beat"})
 		cancel() // defer?
 		if err != nil {
+			log.Printf("heart beat stopped: %v", err)
 			followerStat <- "dead"
 			return
 		}

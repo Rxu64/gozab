@@ -286,14 +286,16 @@ func ElectionRoutine(port string, serial int32) string {
 		}
 
 		log.Printf("checking ACK-E results...")
-		var latestHist = []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}
+		latestHist := make([]*pb.PropTxn, 0)
 		ackeNum := 4 - noreplyCount
 		for i := 0; i < ackeNum; i++ {
 			result := <-ackeResultBuffer
 			if result.state {
 				log.Printf("valid ACK-E")
 				if len(result.hist) == 0 { // system startup, no history yet
-					latestHist = make([]*pb.PropTxn, 0)
+					continue
+				} else if len(latestHist) == 0 { // leader has history, I have no history
+					latestHist = result.hist
 				} else if result.hist[len(result.hist)-1].E > latestHist[len(latestHist)-1].E || result.hist[len(result.hist)-1].E == latestHist[len(latestHist)-1].E && result.hist[len(result.hist)-1].Transaction.Z.Counter >= latestHist[len(latestHist)-1].Transaction.Z.Counter {
 					latestHist = result.hist
 				}
@@ -628,6 +630,8 @@ func prop(client pb.FollowerLeaderClient, port string, serial int32) {
 	}
 	if r.GetContent() == "I Acknowledged" {
 		ackBuffer <- Ack{true, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
+	} else {
+		log.Printf("port %s failed to acknowledge: %s", port, r.GetContent())
 	}
 }
 

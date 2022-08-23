@@ -38,8 +38,12 @@ var (
 	ackBuffer     chan Ack // size 5 queue
 	beatBuffer    chan int // size 5 buffer
 
-	upFollowers = []bool{true, true, true, true, true}
-	upNum       = serverNum
+	// upFollowersUpdateRoutine is the only code that changes those two variables directly!
+	// specifically, election routine reset this array to true by pushing negative values
+	// messenger routiens report follower failure by pushing positive values
+	upFollowers             = []bool{true, true, true, true, true}
+	upNum                   = serverNum
+	upFollowersUpdateBuffer chan int
 
 	// for leader convenience only
 	lastEpoch int32 = 0
@@ -81,6 +85,7 @@ type stateHist struct {
 func main() {
 	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
+	upFollowersUpdateBuffer = make(chan int, 5)
 	port := os.Args[1]
 	r := ElectionRoutine(port, serverMap[port])
 	for {
@@ -684,6 +689,21 @@ func BeatReceiver(leaderStat chan string) {
 		case <-time.After(5 * time.Second):
 			leaderStat <- "dead"
 			return
+		}
+	}
+}
+
+func upFollowersUpdateRoutine() {
+	for {
+		serial := <-upFollowersUpdateBuffer
+		if serial >= 0 {
+			// messenger routine report follower failure
+			upFollowers[serial] = false
+		} else if serial < 0 {
+			// election routine reset upFollowers
+			for i := 0; i < serverNum; i++ {
+				upFollowers[serial] = true
+			}
 		}
 	}
 }

@@ -28,11 +28,13 @@ var (
 	ls *grpc.Server
 	fs *grpc.Server
 
+	// Constants
 	serverNum   = 5
 	userPort    = "localhost:50056"
 	serverPorts = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
 	serverMap   = map[string]int32{"localhost:50051": 0, "localhost:50052": 1, "localhost:50053": 2, "localhost:50054": 3, "localhost:50055": 4}
 
+	// Global channcels for broadcast-phase leader
 	propBuffers   [5]chan *pb.PropTxn
 	commitBuffers [5]chan *pb.CommitTxn
 	ackBuffer     chan Ack // size 5 queue
@@ -234,8 +236,8 @@ func ElectionRoutine(port string, serial int32) string {
 	log.Printf("woke up: %v", time.Duration(n)*time.Millisecond)
 	// time to check
 	select {
-	// didn't receive request, try to be leader
 	case <-voted:
+		// didn't receive request, try to be leader
 		log.Printf("voted to my self")
 		// initialize routines
 		electionHolder := make(chan stateEpoch, 4)
@@ -244,8 +246,10 @@ func ElectionRoutine(port string, serial int32) string {
 		ackeResultBuffer := make(chan stateHist, 4)
 		commitldHolder := make(chan bool, 4)
 		ackldResultBuffer := make(chan bool, 4)
-
 		voteHolder := make(chan int32, 4)
+
+		// setup upFollowers stats
+		go upFollowersUpdateRoutine()
 
 		for i := 0; i < 5; i++ {
 			if int32(i) != serial {
@@ -553,7 +557,6 @@ func serveF(port string) {
 func AckToCmtRoutine() {
 	for {
 		// Collect acknowledgements from Messengers
-		// Update upFollowers statistics
 		for i := 0; i < serverNum; i++ {
 			ack := <-ackBuffer
 			if !ack.valid && upFollowers[ack.serial] {
@@ -694,16 +697,20 @@ func BeatReceiver(leaderStat chan string) {
 }
 
 func upFollowersUpdateRoutine() {
+
+	// election routine reset upFollowers
+	for i := 0; i < serverNum; i++ {
+		upFollowers[i] = true
+		upNum = 5
+	}
+
 	for {
+		// handle messenger routine's report
 		serial := <-upFollowersUpdateBuffer
 		if serial >= 0 {
 			// messenger routine report follower failure
 			upFollowers[serial] = false
-		} else if serial < 0 {
-			// election routine reset upFollowers
-			for i := 0; i < serverNum; i++ {
-				upFollowers[serial] = true
-			}
+			upNum--
 		}
 	}
 }

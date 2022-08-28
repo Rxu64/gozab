@@ -13,7 +13,7 @@
 
 **TODO**: a cross means the cleanup procedures are not implemented yet  
 
-- Election
+- Election (consider cleanup in the commitHelper)
     - upFollowersUpdateRoutine ( x )
     - ElectionMessengerRoutine ( x )
 

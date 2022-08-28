@@ -60,6 +60,13 @@ var (
 
 	voted          chan int32
 	followerHolder chan bool
+
+	//	for election:
+	//		NOTE: fine-grained quitting is already handled by Election routine itself
+	//		CASE 1: when quorum is dead, use this to quit the ElectionMessengers that are
+	//		still working + upFollowersUpdateRoutine
+	//		CASE 2: when election is successful, clean up upFollowerUpdateRoutine
+	universalCleanupHolder chan bool
 )
 
 type leaderServer struct {
@@ -680,6 +687,7 @@ func upFollowersUpdateRoutine() {
 			// Check if quorum dead
 			if upNum <= serverNum/2 {
 				log.Fatalf("quorum dead")
+				// TODO: clean up everything here
 			}
 		}
 	}

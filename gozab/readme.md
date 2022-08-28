@@ -16,7 +16,7 @@
     - ElectionMessengerRoutine ( x )
 
 - Leader
-    - MessengerRoutine
+    - MessengerRoutine ( x ) subject to heartbeat 
         - BeatSender ( x )
         - propcmt ( x ) (naming!!!)
     - AckToCmtRoutine ( x )

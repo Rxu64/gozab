@@ -669,6 +669,7 @@ func cmt(client pb.FollowerLeaderClient, port string, serial int32) {
 	}
 }
 
+// for leader
 func BeatSender(client pb.FollowerLeaderClient, followerStat chan string) {
 	time.Sleep(3 * time.Second) // wait for followers to start service
 	for {
@@ -684,6 +685,7 @@ func BeatSender(client pb.FollowerLeaderClient, followerStat chan string) {
 	}
 }
 
+// for follower
 func BeatReceiver(leaderStat chan string) {
 	for {
 		select {

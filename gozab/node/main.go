@@ -41,7 +41,7 @@ var (
 	beatBuffer    chan int // size 5 buffer
 
 	// upFollowersUpdateRoutine is the only code that changes those two variables directly!
-	// specifically, election routine reset this array to true by pushing negative values
+	// specifically, leader routine reset this array to true by pushing negative values
 	// messenger routiens report follower failure by pushing positive values
 	upFollowers             = []bool{true, true, true, true, true}
 	upNum                   = serverNum
@@ -61,12 +61,8 @@ var (
 	voted          chan int32
 	followerHolder chan bool
 
-	//	for election:
-	//		NOTE: fine-grained quitting is already handled by Election routine itself
-	//		CASE 1: when quorum is dead, use this to quit the ElectionMessengers that are
-	//		still working + upFollowersUpdateRoutine
-	//		CASE 2: when election is successful, clean up upFollowerUpdateRoutine
-	universalCleanupHolder chan bool
+	//	for leader's use to clean up everything
+	universalCleanupHolder chan int32
 )
 
 type leaderServer struct {
@@ -94,7 +90,6 @@ type stateHist struct {
 func main() {
 	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
-	upFollowersUpdateBuffer = make(chan int32, 5)
 	port := os.Args[1]
 	r := ElectionRoutine(port, serverMap[port])
 	for {
@@ -125,12 +120,21 @@ func (s *leaderServer) Retrieve(ctx context.Context, in *pb.GetTxn) (*pb.ResultT
 }
 
 func LeaderRoutine(port string) string {
+
 	for i := 0; i < serverNum; i++ {
 		propBuffers[i] = make(chan *pb.PropTxn)
 		commitBuffers[i] = make(chan *pb.CommitTxn)
 	}
 	ackBuffer = make(chan Ack, 5)
 
+	// setup upFollowers stats
+	upFollowersUpdateBuffer = make(chan int32, 5)
+	go upFollowersUpdateRoutine()
+
+	// setup cleanup holder
+	universalCleanupHolder = make(chan int32)
+
+	// initialize leader-attached local follower
 	go FollowerRoutine(port)
 
 	go MessengerRoutine(serverPorts[0], 0)
@@ -142,6 +146,9 @@ func LeaderRoutine(port string) string {
 	go AckToCmtRoutine()
 
 	go serveL()
+
+	// wait for quorum dead and cleanup signal
+	<-universalCleanupHolder
 
 	log.Printf("quorum dead")
 	ls.Stop()
@@ -251,9 +258,6 @@ func ElectionRoutine(port string, serial int32) string {
 		commitldHolder := make(chan bool, 4)
 		ackldResultBuffer := make(chan bool, 4)
 		voteHolder := make(chan int32, 4)
-
-		// setup upFollowers stats
-		go upFollowersUpdateRoutine()
 
 		for i := 0; i < 5; i++ {
 			if int32(i) != serial {
@@ -400,16 +404,6 @@ func ElectionMessengerRoutine(port string, voteHolder chan int32, electionHolder
 		return
 	}
 	if !newepochHelper(port, checkElection.epoch, ackeResultBuffer, client) {
-		return
-	}
-
-	// wait for quorum check and propose new leader
-	checkSynchronization := <-synchronizationHolder
-	if !checkSynchronization.state {
-		return
-	}
-	if !newleaderHelper(port, checkSynchronization.hist, ackldResultBuffer, client) {
-		return
 	}
 
 	// wait for quorum check and commit new leader
@@ -557,16 +551,26 @@ func serveF(port string) {
 	}
 }
 
+// NOTE:	now this routine do very minimal work, this does not even check if the ack is valid.
+//			most work are handled by the PropAndCmtRoutine
 func AckToCmtRoutine() {
 	for {
 		for i := 0; i < serverNum; i++ {
-			<-ackBuffer
+			select {
+			case <-universalCleanupHolder:
+				// this is to prevent PropAndCmtRoutine stucked at waiting commits
+				// if quorum is already dead, it's okay to send this commit since
+				// the PropAndCmt will check this
+				for i := 0; i < serverNum; i++ {
+					commitBuffers[i] <- &pb.CommitTxn{Content: "Please commit"}
+				}
+				return
+			case <-ackBuffer:
+			}
 		}
 
-		for i, up := range upFollowers {
-			if up {
-				commitBuffers[i] <- &pb.CommitTxn{Content: "Please commit"}
-			}
+		for i := 0; i < serverNum; i++ {
+			commitBuffers[i] <- &pb.CommitTxn{Content: "Please commit"}
 		}
 	}
 }
@@ -590,13 +594,21 @@ func MessengerRoutine(port string, serial int32) {
 
 func PropAndCmtRoutine(port string, serial int32, client pb.FollowerLeaderClient) {
 	for {
-		proposal := <-propBuffers[serial]
+
+		var proposal *pb.PropTxn
+
+		select {
+		case <-universalCleanupHolder:
+			return
+		case proposal = <-propBuffers[serial]:
+		}
+
 		if !upFollowers[serial] {
 			ackBuffer <- Ack{false, serial, -1, -1}
 		} else {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			r, err := client.Broadcast(ctx, proposal)
-			cancel() // defer?
+			defer cancel() // defer?
 			if err != nil {
 				log.Printf("could not broadcast to server %s: %v", port, err)
 				status, ok := status.FromError(err)
@@ -617,10 +629,10 @@ func PropAndCmtRoutine(port string, serial int32, client pb.FollowerLeaderClient
 		}
 
 		commit := <-commitBuffers[serial]
-		if upFollowers[serial] {
+		if upFollowers[serial] && upNum > serverNum/2 {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			r, err := client.Commit(ctx, commit)
-			cancel() // defer?
+			defer cancel() // defer?
 			if err != nil {
 				log.Printf("could not issue commit to server %s: %v", port, err)
 				status, ok := status.FromError(err)
@@ -644,6 +656,11 @@ func PropAndCmtRoutine(port string, serial int32, client pb.FollowerLeaderClient
 func BeatSendRoutine(port string, serial int32, client pb.FollowerLeaderClient) {
 	time.Sleep(3 * time.Second) // wait for followers to start service
 	for {
+		select {
+		case <-universalCleanupHolder:
+			return
+		default:
+		}
 		time.Sleep(100 * time.Millisecond)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_, err := client.HeartBeat(ctx, &pb.Empty{Content: "Beat"})
@@ -687,7 +704,11 @@ func upFollowersUpdateRoutine() {
 			// Check if quorum dead
 			if upNum <= serverNum/2 {
 				log.Fatalf("quorum dead")
-				// TODO: clean up everything here
+				// TODO: clean up everything here (beatSender and propCmt for each node, plus upFollower)
+				for i := 0; i < serverNum*2+1; i++ {
+					universalCleanupHolder <- 0
+				}
+				return
 			}
 		}
 	}

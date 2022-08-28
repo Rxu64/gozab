@@ -1,5 +1,7 @@
 # TODOs
 - update upFollowers and the cleanup of  election-messenger routine, also need to redesign the heartbeat-to-dead logics
+- do the global cleanup in upFollowersUpdateRoutine quorum dead
+- leader needs a way to know quorum dead and thus enter election
 - 
 
 # Building Blocks
@@ -18,7 +20,7 @@
 - Leader
     - MessengerRoutine ( x ) subject to heartbeat 
         - BeatSender ( x )
-        - propcmt ( x ) (naming!!!)
+        - PropAndCmtRoutine ( x )
     - AckToCmtRoutine ( x )
 
 ## Concurrent Global Variables

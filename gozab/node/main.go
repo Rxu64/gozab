@@ -45,7 +45,7 @@ var (
 	// messenger routiens report follower failure by pushing positive values
 	upFollowers             = []bool{true, true, true, true, true}
 	upNum                   = serverNum
-	upFollowersUpdateBuffer chan int
+	upFollowersUpdateBuffer chan int32
 
 	// for leader convenience only
 	lastEpoch int32 = 0
@@ -87,7 +87,7 @@ type stateHist struct {
 func main() {
 	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
-	upFollowersUpdateBuffer = make(chan int, 5)
+	upFollowersUpdateBuffer = make(chan int32, 5)
 	port := os.Args[1]
 	r := ElectionRoutine(port, serverMap[port])
 	for {
@@ -126,18 +126,16 @@ func LeaderRoutine(port string) string {
 
 	go FollowerRoutine(port)
 
-	messengerStat := make(chan string)
-	go MessengerRoutine(serverPorts[0], 0, messengerStat)
-	go MessengerRoutine(serverPorts[1], 1, messengerStat)
-	go MessengerRoutine(serverPorts[2], 2, messengerStat)
-	go MessengerRoutine(serverPorts[3], 3, messengerStat)
-	go MessengerRoutine(serverPorts[4], 4, messengerStat)
+	go MessengerRoutine(serverPorts[0], 0)
+	go MessengerRoutine(serverPorts[1], 1)
+	go MessengerRoutine(serverPorts[2], 2)
+	go MessengerRoutine(serverPorts[3], 3)
+	go MessengerRoutine(serverPorts[4], 4)
 
 	go AckToCmtRoutine()
 
 	go serveL()
 
-	<-messengerStat
 	log.Printf("quorum dead")
 	ls.Stop()
 	return "elect"
@@ -212,7 +210,6 @@ func (s *voterServer) CommitNewLeader(ctx context.Context, in *pb.Epoch) (*pb.Em
 	for _, v := range pStorage {
 		dStruct[v.Transaction.V.Key] = v.Transaction.V.Value
 	}
-	// TODO: add epoch num to commit messages, if not match lift holder with false
 	followerHolder <- true
 
 	return &pb.Empty{}, nil
@@ -257,7 +254,6 @@ func ElectionRoutine(port string, serial int32) string {
 			}
 		}
 
-		// TODO: voteHolder does not solve the problem when two prospective leaders racing each other
 		for i := 0; i < 4; i++ {
 			<-voteHolder // make sure election messenger routines started bofore checking results
 		}
@@ -530,7 +526,7 @@ func FollowerRoutine(port string) string {
 	// follower receiving leader's heartbeat
 	beatBuffer = make(chan int, 5)
 	leaderStat := make(chan string)
-	go BeatReceiver(leaderStat)
+	go BeatReceiveRoutine(leaderStat)
 
 	go serveF(port)
 
@@ -556,24 +552,12 @@ func serveF(port string) {
 
 func AckToCmtRoutine() {
 	for {
-		// Collect acknowledgements from Messengers
 		for i := 0; i < serverNum; i++ {
-			ack := <-ackBuffer
-			if !ack.valid && upFollowers[ack.serial] {
-				upFollowers[ack.serial] = false
-				upNum--
-			}
+			<-ackBuffer
 		}
 
-		// Check if quorum dead
-		if upNum <= serverNum/2 {
-			log.Printf("quorum dead")
-			return
-		}
-
-		// Send commits to the acknowledged followers
-		for i, acknowledged := range upFollowers {
-			if acknowledged {
+		for i, up := range upFollowers {
+			if up {
 				commitBuffers[i] <- &pb.CommitTxn{Content: "Please commit"}
 			}
 		}
@@ -581,7 +565,7 @@ func AckToCmtRoutine() {
 }
 
 // CORE BROACAST FUNCTION!
-func MessengerRoutine(port string, serial int32, messengerStat chan string) {
+func MessengerRoutine(port string, serial int32) {
 	// dial follower
 	conn, err := grpc.Dial(serverPorts[serial], grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -592,85 +576,65 @@ func MessengerRoutine(port string, serial int32, messengerStat chan string) {
 	client := pb.NewFollowerLeaderClient(conn)
 
 	// leader receiving follower's heartbeat
-	followerStat := make(chan string)
-	go BeatSender(client, followerStat)
+	go BeatSendRoutine(port, serial, client)
 
-	go propcmt(client, port, serial)
-
-	<-followerStat
-	upFollowers[serial] = false
-	upNum--
-	log.Printf("follower %s down, messenger quit", port)
-	// check quorum dead
-	if upNum <= serverNum/2 {
-		messengerStat <- "returned"
-	}
+	go PropAndCmtRoutine(port, serial, client)
 }
 
-func propcmt(client pb.FollowerLeaderClient, port string, serial int32) {
+func PropAndCmtRoutine(port string, serial int32, client pb.FollowerLeaderClient) {
 	for {
-		prop(client, port, serial)
-		cmt(client, port, serial)
-	}
-}
-
-func prop(client pb.FollowerLeaderClient, port string, serial int32) {
-	// send proposal
-	proposal := <-propBuffers[serial]
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	r, err := client.Broadcast(ctx, proposal)
-	cancel() // defer?
-	if err != nil {
-		log.Printf("could not broadcast to server %s: %v", port, err)
-		status, ok := status.FromError(err)
-		if ok {
-			if status.Code() == codes.DeadlineExceeded {
-				log.Printf("Server %s timeout, Messenger exit", port)
+		proposal := <-propBuffers[serial]
+		if !upFollowers[serial] {
+			ackBuffer <- Ack{false, serial, -1, -1}
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			r, err := client.Broadcast(ctx, proposal)
+			cancel() // defer?
+			if err != nil {
+				log.Printf("could not broadcast to server %s: %v", port, err)
+				status, ok := status.FromError(err)
+				if ok {
+					if status.Code() == codes.DeadlineExceeded {
+						log.Printf("Server %s timeout", port)
+					}
+				}
+				upFollowersUpdateBuffer <- serial
+				ackBuffer <- Ack{false, serial, -1, -1}
+			}
+			if r.GetContent() == "I Acknowledged" {
+				ackBuffer <- Ack{true, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
+			} else {
+				log.Printf("Server %s failed to acknowledge: %s", port, r.GetContent())
+				ackBuffer <- Ack{false, serial, -1, -1}
 			}
 		}
-		// dead Messenger
-		log.Printf("messenger on %s initiated death mode", port)
-		ackBuffer <- Ack{false, serial, -1, -1}
-		for {
-			<-propBuffers[serial]
-			ackBuffer <- Ack{false, serial, -1, -1}
-		}
-	}
-	if r.GetContent() == "I Acknowledged" {
-		ackBuffer <- Ack{true, serial, proposal.GetTransaction().GetZ().Epoch, proposal.GetTransaction().GetZ().Counter}
-	} else {
-		log.Printf("port %s failed to acknowledge: %s", port, r.GetContent())
-	}
-}
 
-func cmt(client pb.FollowerLeaderClient, port string, serial int32) {
-	// send commit
-	commit := <-commitBuffers[serial]
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	r, err := client.Commit(ctx, commit)
-	cancel() // defer?
-	if err != nil {
-		log.Printf("could not issue commit to server %s: %v", port, err)
-		status, ok := status.FromError(err)
-		if ok {
-			if status.Code() == codes.DeadlineExceeded {
-				log.Printf("Server %s timeout, Messenger exit", port)
+		commit := <-commitBuffers[serial]
+		if upFollowers[serial] {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			r, err := client.Commit(ctx, commit)
+			cancel() // defer?
+			if err != nil {
+				log.Printf("could not issue commit to server %s: %v", port, err)
+				status, ok := status.FromError(err)
+				if ok {
+					if status.Code() == codes.DeadlineExceeded {
+						log.Printf("Server %s timeout", port)
+					}
+				}
+				upFollowersUpdateBuffer <- serial
+			}
+			if r.GetContent() == "Commit message recieved" {
+				log.Printf("Commit feedback recieved from %s", port)
+			} else {
+				log.Printf("Server %s failed to commit: %s", port, r.GetContent())
 			}
 		}
-		// dead Messenger
-		log.Printf("messenger on %s initiated death mode", port)
-		for {
-			<-propBuffers[serial]
-			ackBuffer <- Ack{false, serial, -1, -1}
-		}
-	}
-	if r.GetContent() == "Commit message recieved" {
-		log.Printf("Commit feedback recieved from %s", port)
 	}
 }
 
 // for leader
-func BeatSender(client pb.FollowerLeaderClient, followerStat chan string) {
+func BeatSendRoutine(port string, serial int32, client pb.FollowerLeaderClient) {
 	time.Sleep(3 * time.Second) // wait for followers to start service
 	for {
 		time.Sleep(100 * time.Millisecond)
@@ -678,15 +642,15 @@ func BeatSender(client pb.FollowerLeaderClient, followerStat chan string) {
 		_, err := client.HeartBeat(ctx, &pb.Empty{Content: "Beat"})
 		cancel() // defer?
 		if err != nil {
-			log.Printf("heart beat stopped: %v", err)
-			followerStat <- "dead"
+			log.Printf("Server %s heart beat stopped: %v", port, err)
+			upFollowersUpdateBuffer <- serial
 			return
 		}
 	}
 }
 
 // for follower
-func BeatReceiver(leaderStat chan string) {
+func BeatReceiveRoutine(leaderStat chan string) {
 	for {
 		select {
 		case <-beatBuffer:
@@ -709,10 +673,14 @@ func upFollowersUpdateRoutine() {
 	for {
 		// handle messenger routine's report
 		serial := <-upFollowersUpdateBuffer
-		if serial >= 0 {
+		if serial >= 0 && upFollowers[serial] {
 			// messenger routine report follower failure
 			upFollowers[serial] = false
 			upNum--
+			// Check if quorum dead
+			if upNum <= serverNum/2 {
+				log.Fatalf("quorum dead")
+			}
 		}
 	}
 }

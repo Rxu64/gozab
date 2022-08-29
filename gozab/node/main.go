@@ -150,7 +150,6 @@ func LeaderRoutine(port string) string {
 	// wait for quorum dead and cleanup signal
 	<-universalCleanupHolder
 
-	log.Printf("quorum dead")
 	ls.Stop()
 	return "elect"
 }
@@ -374,7 +373,7 @@ func ElectionRoutine(port string, serial int32) string {
 			log.Printf("proceeding to phase 3 as a follower...")
 			vs.Stop()
 			return "follow"
-		case <-time.After(10 * time.Second):
+		case <-time.After(6 * time.Second):
 			log.Printf("time out, restarting election...")
 			vs.Stop()
 			return "elect"
@@ -426,6 +425,14 @@ func ElectionMessengerRoutine(port string, voteHolder chan int32, electionHolder
 func newleaderHelper(port string, latestHist []*pb.PropTxn, ackldResultBuffer chan bool, client pb.VoterCandidateClient) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+
+	// for local follower
+	lastLeaderProp = lastEpoch
+	pStorage = latestHist
+	for _, v := range pStorage {
+		v.E = lastEpoch
+	}
+
 	r, err := client.NewLeader(ctx, &pb.EpochHist{Epoch: lastEpoch, Hist: latestHist})
 	if err != nil {
 		// this messenger is dead
@@ -445,6 +452,12 @@ func newleaderHelper(port string, latestHist []*pb.PropTxn, ackldResultBuffer ch
 func commitldHelper(port string, client pb.VoterCandidateClient) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+
+	// for local follower
+	for _, v := range pStorage {
+		dStruct[v.Transaction.V.Key] = v.Transaction.V.Value
+	}
+
 	_, err := client.CommitNewLeader(ctx, &pb.Epoch{Epoch: lastEpoch})
 	if err != nil {
 		log.Printf("failed to send Commit-LD to %s: %v", port, err)
@@ -475,6 +488,10 @@ func askvoteHelper(port string, voteRequestResultBuffer chan stateEpoch, client 
 func newepochHelper(port string, epoch int32, ackeResultBuffer chan stateHist, client pb.VoterCandidateClient) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+
+	// for local follower
+	lastEpochProp = epoch
+
 	hist, err := client.NewEpoch(ctx, &pb.Epoch{Epoch: epoch})
 	if err != nil {
 		// this messenger is dead
@@ -507,7 +524,7 @@ func (s *followerServer) Broadcast(ctx context.Context, in *pb.PropTxn) (*pb.Ack
 		// simply for preventing delayed dilivery from old leader
 		return &pb.AckTxn{Content: "Ignore stale messeges"}, nil
 	}
-	log.Printf("Follower received proposa")
+	log.Printf("Follower received proposal")
 	// writes the proposal to local stable storage
 	pStorage = append(pStorage, in)
 	log.Printf("local stable storage: %+v", pStorage)
@@ -581,7 +598,7 @@ func AckToCmtRoutine() {
 		}
 
 		for i := 0; i < serverNum; i++ {
-			commitBuffers[i] <- &pb.CommitTxn{Content: "Please commit"}
+			commitBuffers[i] <- &pb.CommitTxn{Content: "Please commit", Epoch: lastEpoch}
 		}
 	}
 }
@@ -669,7 +686,7 @@ func PropAndCmtRoutine(port string, serial int32, client pb.FollowerLeaderClient
 
 // for leader
 func BeatSendRoutine(port string, serial int32, client pb.FollowerLeaderClient) {
-	time.Sleep(time.Second) // wait for followers to start service
+	time.Sleep(2 * time.Second) // wait for followers to start service
 	for {
 		select {
 		case <-universalCleanupHolder:
@@ -693,7 +710,7 @@ func BeatReceiveRoutine(leaderStat chan string) {
 	for {
 		select {
 		case <-beatBuffer:
-			log.Printf("beat")
+			//log.Printf("beat")
 		case <-time.After(5 * time.Second):
 			leaderStat <- "dead"
 			return
@@ -718,9 +735,9 @@ func upFollowersUpdateRoutine() {
 			upNum--
 			// Check if quorum dead
 			if upNum <= serverNum/2 {
-				log.Fatalf("quorum dead")
-				// TODO: clean up everything here (beatSender and propCmt for each node, plus upFollower)
-				for i := 0; i < serverNum*2+1; i++ {
+				log.Printf("quorum dead")
+				// TODO: clean up everything here (beatSender and propCmt for each node, plus leader and ackToCmt)
+				for i := 0; i < serverNum*2+2; i++ {
 					universalCleanupHolder <- 0
 				}
 				return

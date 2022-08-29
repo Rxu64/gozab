@@ -122,8 +122,8 @@ func (s *leaderServer) Retrieve(ctx context.Context, in *pb.GetTxn) (*pb.ResultT
 func LeaderRoutine(port string) string {
 
 	for i := 0; i < serverNum; i++ {
-		propBuffers[i] = make(chan *pb.PropTxn)
-		commitBuffers[i] = make(chan *pb.CommitTxn)
+		propBuffers[i] = make(chan *pb.PropTxn, 1)
+		commitBuffers[i] = make(chan *pb.CommitTxn, 1)
 	}
 	ackBuffer = make(chan Ack, 5)
 
@@ -132,7 +132,7 @@ func LeaderRoutine(port string) string {
 	go upFollowersUpdateRoutine()
 
 	// setup cleanup holder
-	universalCleanupHolder = make(chan int32)
+	universalCleanupHolder = make(chan int32, 1)
 
 	// initialize leader-attached local follower
 	go FollowerRoutine(port)
@@ -404,6 +404,16 @@ func ElectionMessengerRoutine(port string, voteHolder chan int32, electionHolder
 		return
 	}
 	if !newepochHelper(port, checkElection.epoch, ackeResultBuffer, client) {
+		return
+	}
+
+	// wait for quorum check and propose new leader
+	checkSynchronization := <-synchronizationHolder
+	if !checkSynchronization.state {
+		return
+	}
+	if !newleaderHelper(port, checkSynchronization.hist, ackldResultBuffer, client) {
+		return
 	}
 
 	// wait for quorum check and commit new leader
@@ -526,7 +536,7 @@ func (s *followerServer) HeartBeat(ctx context.Context, in *pb.Empty) (*pb.Empty
 func FollowerRoutine(port string) string {
 	// follower receiving leader's heartbeat
 	beatBuffer = make(chan int, 5)
-	leaderStat := make(chan string)
+	leaderStat := make(chan string, 1)
 	go BeatReceiveRoutine(leaderStat)
 
 	go serveF(port)
@@ -565,7 +575,8 @@ func AckToCmtRoutine() {
 					commitBuffers[i] <- &pb.CommitTxn{Content: "Please commit"}
 				}
 				return
-			case <-ackBuffer:
+			default:
+				<-ackBuffer
 			}
 		}
 
@@ -590,6 +601,9 @@ func MessengerRoutine(port string, serial int32) {
 	go BeatSendRoutine(port, serial, client)
 
 	go PropAndCmtRoutine(port, serial, client)
+
+	messengerHolder := make(chan int32, 1)
+	<-messengerHolder
 }
 
 func PropAndCmtRoutine(port string, serial int32, client pb.FollowerLeaderClient) {
@@ -600,7 +614,8 @@ func PropAndCmtRoutine(port string, serial int32, client pb.FollowerLeaderClient
 		select {
 		case <-universalCleanupHolder:
 			return
-		case proposal = <-propBuffers[serial]:
+		default:
+			proposal = <-propBuffers[serial]
 		}
 
 		if !upFollowers[serial] {
@@ -608,7 +623,7 @@ func PropAndCmtRoutine(port string, serial int32, client pb.FollowerLeaderClient
 		} else {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			r, err := client.Broadcast(ctx, proposal)
-			defer cancel() // defer?
+			defer cancel()
 			if err != nil {
 				log.Printf("could not broadcast to server %s: %v", port, err)
 				status, ok := status.FromError(err)
@@ -632,7 +647,7 @@ func PropAndCmtRoutine(port string, serial int32, client pb.FollowerLeaderClient
 		if upFollowers[serial] && upNum > serverNum/2 {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			r, err := client.Commit(ctx, commit)
-			defer cancel() // defer?
+			defer cancel()
 			if err != nil {
 				log.Printf("could not issue commit to server %s: %v", port, err)
 				status, ok := status.FromError(err)
@@ -654,21 +669,21 @@ func PropAndCmtRoutine(port string, serial int32, client pb.FollowerLeaderClient
 
 // for leader
 func BeatSendRoutine(port string, serial int32, client pb.FollowerLeaderClient) {
-	time.Sleep(3 * time.Second) // wait for followers to start service
+	time.Sleep(time.Second) // wait for followers to start service
 	for {
 		select {
 		case <-universalCleanupHolder:
 			return
 		default:
-		}
-		time.Sleep(100 * time.Millisecond)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, err := client.HeartBeat(ctx, &pb.Empty{Content: "Beat"})
-		cancel() // defer?
-		if err != nil {
-			log.Printf("Server %s heart beat stopped: %v", port, err)
-			upFollowersUpdateBuffer <- serial
-			return
+			time.Sleep(100 * time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, err := client.HeartBeat(ctx, &pb.Empty{Content: "Beat"})
+			defer cancel()
+			if err != nil {
+				log.Printf("Server %s heart beat stopped: %v", port, err)
+				upFollowersUpdateBuffer <- serial
+				return
+			}
 		}
 	}
 }

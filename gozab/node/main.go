@@ -29,10 +29,12 @@ var (
 	fs *grpc.Server
 
 	// Constants
-	serverNum   = 5
-	userPort    = "localhost:50056"
-	serverPorts = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
-	serverMap   = map[string]int32{"localhost:50051": 0, "localhost:50052": 1, "localhost:50053": 2, "localhost:50054": 3, "localhost:50055": 4}
+	serverNum = 5
+	userPort  = "localhost:50056"
+	// serverPorts = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
+	// serverMap   = map[string]int32{"localhost:50051": 0, "localhost:50052": 1, "localhost:50053": 2, "localhost:50054": 3, "localhost:50055": 4}
+	serverPorts = []string{"10.19.188.95:50051", "10.19.125.245:50051", "localhost:50053", "localhost:50054", "localhost:50055"}
+	serverMap   = map[string]int32{"10.19.188.95:50051": 0, "10.19.125.245:50051": 1, "localhost:50053": 2, "localhost:50054": 3, "localhost:50055": 4}
 
 	// Global channcels for broadcast-phase leader
 	propBuffers   [5]chan *pb.PropTxn
@@ -579,7 +581,8 @@ func serveF(port string) {
 }
 
 // NOTE:	now this routine do very minimal work, this does not even check if the ack is valid.
-//			most work are handled by the PropAndCmtRoutine
+//
+//	most work are handled by the PropAndCmtRoutine
 func AckToCmtRoutine() {
 	for {
 		for i := 0; i < serverNum; i++ {

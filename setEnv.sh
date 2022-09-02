@@ -1,5 +1,3 @@
 #! bin/bash
-{
-    echo -e '\nexport PATH=$PATH:/usr/local/go/bin' >> .profile
-    source .profile
-}
+echo -e '\nexport PATH=$PATH:/usr/local/go/bin' >> .profile
+source .profile

@@ -11,6 +11,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+var (
+	serverPorts = []string{"198.22.255.12:50051", "198.22.255.16:50052", "198.22.255.28:50053", "198.22.255.11:50054", "198.22.255.15:50055"}
+	serverMap   = map[string]int32{"198.22.255.12:50051": 0, "198.22.255.16:50052": 1, "198.22.255.28:50053": 2, "198.22.255.11:50054": 3, "198.22.255.15:50055": 4}
+)
+
 func main() {
 	conn, err := grpc.Dial("localhost:50056", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {

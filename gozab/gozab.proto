@@ -15,6 +15,7 @@ service FollowerLeader {
 service LeaderUser {
     rpc Store (Vec) returns (Empty) {}
     rpc Retrieve (GetTxn) returns (ResultTxn) {}
+    rpc Identify (Empty) returns (Vote) {}
 }
 
 // the service during election

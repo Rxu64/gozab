@@ -182,6 +182,7 @@ var FollowerLeader_ServiceDesc = grpc.ServiceDesc{
 type LeaderUserClient interface {
 	Store(ctx context.Context, in *Vec, opts ...grpc.CallOption) (*Empty, error)
 	Retrieve(ctx context.Context, in *GetTxn, opts ...grpc.CallOption) (*ResultTxn, error)
+	Identify(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Vote, error)
 }
 
 type leaderUserClient struct {
@@ -210,12 +211,22 @@ func (c *leaderUserClient) Retrieve(ctx context.Context, in *GetTxn, opts ...grp
 	return out, nil
 }
 
+func (c *leaderUserClient) Identify(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Vote, error) {
+	out := new(Vote)
+	err := c.cc.Invoke(ctx, "/gozab.LeaderUser/Identify", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LeaderUserServer is the server API for LeaderUser service.
 // All implementations must embed UnimplementedLeaderUserServer
 // for forward compatibility
 type LeaderUserServer interface {
 	Store(context.Context, *Vec) (*Empty, error)
 	Retrieve(context.Context, *GetTxn) (*ResultTxn, error)
+	Identify(context.Context, *Empty) (*Vote, error)
 	mustEmbedUnimplementedLeaderUserServer()
 }
 
@@ -228,6 +239,9 @@ func (UnimplementedLeaderUserServer) Store(context.Context, *Vec) (*Empty, error
 }
 func (UnimplementedLeaderUserServer) Retrieve(context.Context, *GetTxn) (*ResultTxn, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Retrieve not implemented")
+}
+func (UnimplementedLeaderUserServer) Identify(context.Context, *Empty) (*Vote, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Identify not implemented")
 }
 func (UnimplementedLeaderUserServer) mustEmbedUnimplementedLeaderUserServer() {}
 
@@ -278,6 +292,24 @@ func _LeaderUser_Retrieve_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LeaderUser_Identify_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LeaderUserServer).Identify(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gozab.LeaderUser/Identify",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LeaderUserServer).Identify(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LeaderUser_ServiceDesc is the grpc.ServiceDesc for LeaderUser service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -292,6 +324,10 @@ var LeaderUser_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Retrieve",
 			Handler:    _LeaderUser_Retrieve_Handler,
+		},
+		{
+			MethodName: "Identify",
+			Handler:    _LeaderUser_Identify_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

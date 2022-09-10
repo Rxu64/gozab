@@ -13,18 +13,18 @@ import (
 )
 
 var (
-	serverPorts = []string{"198.22.255.12:50056", "198.22.255.16:50056", "198.22.255.28:50056", "198.22.255.11:50056", "198.22.255.15:50056"}
+	serverPorts = []string{"localhost:50056", "localhost:50057", "localhost:50058", "localhost:50059", "localhost:50060"}
 )
 
 func main() {
 	found := make(chan int, 1)
 	lost := make(chan int, 1)
 	for {
-		go finder(1, found, lost)
-		go finder(2, found, lost)
-		go finder(3, found, lost)
-		go finder(4, found, lost)
-		go finder(0, found, lost)
+		go connectionRoutine(1, found, lost)
+		go connectionRoutine(2, found, lost)
+		go connectionRoutine(3, found, lost)
+		go connectionRoutine(4, found, lost)
+		go connectionRoutine(0, found, lost)
 		select {
 		case <-found:
 			<-lost
@@ -34,7 +34,7 @@ func main() {
 	}
 }
 
-func finder(serial int, found chan int, lost chan int) {
+func connectionRoutine(serial int, found chan int, lost chan int) {
 	conn, err := grpc.Dial(serverPorts[serial], grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Printf("failed to connect: %v", err)
@@ -66,7 +66,7 @@ func finder(serial int, found chan int, lost chan int) {
 				fmt.Scanf("%s %d", &key, &val)
 				r, err := c.Store(context.Background(), &pb.Vec{Key: key, Value: val})
 				if err != nil {
-					log.Printf("could not send request to leader: %v", err)
+					log.Printf("could not send request to leader, try again: %v", err)
 					lost <- 1
 					return
 				}
@@ -76,7 +76,7 @@ func finder(serial int, found chan int, lost chan int) {
 				fmt.Scanf("%s", &key)
 				r, err := c.Retrieve(context.Background(), &pb.GetTxn{Key: key})
 				if err != nil {
-					log.Printf("could not send Get request to leader: %v", err)
+					log.Printf("could not send Get request to leader, try again: %v", err)
 					lost <- 1
 					return
 				}

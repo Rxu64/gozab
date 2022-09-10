@@ -31,9 +31,13 @@ var (
 	fs *grpc.Server
 
 	// Constants
-	userPort    = "198.22.255.14:50056"
-	serverPorts = []string{"198.22.255.12:50051", "198.22.255.16:50052", "198.22.255.28:50053", "198.22.255.11:50054", "198.22.255.15:50055"}
-	serverMap   = map[string]int32{"198.22.255.12:50051": 0, "198.22.255.16:50052": 1, "198.22.255.28:50053": 2, "198.22.255.11:50054": 3, "198.22.255.15:50055": 4}
+	// userPort    = "localhost:50056"
+	// serverPorts = []string{"198.22.255.12:50051", "198.22.255.16:50052", "198.22.255.28:50053", "198.22.255.11:50054", "198.22.255.15:50055"}
+	// serverMap   = map[string]int32{"198.22.255.12:50051": 0, "198.22.255.16:50052": 1, "198.22.255.28:50053": 2, "198.22.255.11:50054": 3, "198.22.255.15:50055": 4}
+
+	userPort    string
+	serverPorts = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
+	serverMap   = map[string]int32{"localhost:50051": 0, "localhost:50052": 1, "localhost:50053": 2, "localhost:50054": 3, "localhost:50055": 4}
 
 	// Global channcels for broadcast-phase leader
 	propChannels   [nodeNum]chan *pb.PropTxn
@@ -92,6 +96,7 @@ func main() {
 	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
 	port := os.Args[1]
+	userPort = os.Args[2]
 	r := Elect(port, serverMap[port])
 	for {
 		if r == "elect" {
@@ -118,6 +123,12 @@ func (s *leaderServer) Store(ctx context.Context, in *pb.Vec) (*pb.Empty, error)
 func (s *leaderServer) Retrieve(ctx context.Context, in *pb.GetTxn) (*pb.ResultTxn, error) {
 	log.Printf("Leader received user retrieve")
 	return &pb.ResultTxn{Value: dStruct[in.GetKey()]}, nil
+}
+
+// Leader's Handler: implementation of user Identify handler
+func (s *leaderServer) Identify(ctx context.Context, in *pb.Empty) (*pb.Vote, error) {
+	log.Printf("Leader received user identify")
+	return &pb.Vote{Voted: true}, nil
 }
 
 func Lead(port string) string {

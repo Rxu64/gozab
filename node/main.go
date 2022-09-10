@@ -32,9 +32,8 @@ var (
 
 	// Constants
 	userPort    = "localhost:50056"
-	serverPorts = []string{"198.22.255.:50051", "198.22.255.:50052", "198.22.255.:50053", "198.22.255.:50054", "198.22.255.:50055"}
-	serverMap   = map[string]int32{"198.22.255.:50051": 0, "198.22.255.:50052": 1, "198.22.255.:50053": 2, "198.22.255.:50054": 3, "198.22.255.:50055": 4}
-
+	serverPorts = []string{"128.110.217.123:50051", "128.110.217.125:50052", "128.110.217.140:50053", "128.110.217.135:50054", "128.110.217.127:50055"}
+	serverMap   = map[string]int32{"128.110.217.123:50051": 0, "128.110.217.125:50052": 1, "128.110.217.140:50053": 2, "128.110.217.135:50054": 3, "128.110.217.127:50055": 4}
 	// Global channcels for broadcast-phase leader
 	propChannels   [nodeNum]chan *pb.PropTxn
 	commitChannels [nodeNum]chan *pb.CommitTxn
@@ -92,7 +91,6 @@ func main() {
 	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
 	port := os.Args[1]
-	userPort = os.Args[2]
 	r := Elect(port, serverMap[port])
 	for {
 		if r == "elect" {

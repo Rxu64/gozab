@@ -31,7 +31,7 @@ var (
 	fs *grpc.Server
 
 	// Constants
-	userPort    = "localhost:50056"
+	userPort    string
 	serverPorts = []string{"128.110.217.123:50051", "128.110.217.125:50052", "128.110.217.140:50053", "128.110.217.135:50054", "128.110.217.127:50055"}
 	serverMap   = map[string]int32{"128.110.217.123:50051": 0, "128.110.217.125:50052": 1, "128.110.217.140:50053": 2, "128.110.217.135:50054": 3, "128.110.217.127:50055": 4}
 	// Global channcels for broadcast-phase leader
@@ -91,6 +91,7 @@ func main() {
 	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
 	port := os.Args[1]
+	userPort = os.Args[2]
 	r := Elect(port, serverMap[port])
 	for {
 		if r == "elect" {

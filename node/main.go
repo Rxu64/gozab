@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	pb "gozab/gozab"
@@ -33,7 +35,6 @@ var (
 	// Constants
 	userPort    string
 	serverPorts = []string{"128.110.217.123:50051", "128.110.217.125:50052", "128.110.217.140:50053", "128.110.217.135:50054", "128.110.217.127:50055"}
-	serverMap   = map[string]int32{"128.110.217.123:50051": 0, "128.110.217.125:50052": 1, "128.110.217.140:50053": 2, "128.110.217.135:50054": 3, "128.110.217.127:50055": 4}
 	// Global channcels for broadcast-phase leader
 	propChannels   [nodeNum]chan *pb.PropTxn
 	commitChannels [nodeNum]chan *pb.CommitTxn
@@ -90,16 +91,16 @@ type stateHist struct {
 func main() {
 	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
-	port := os.Args[1]
-	userPort = os.Args[2]
-	r := Elect(port, serverMap[port])
+	serial, _ := strconv.Atoi(os.Args[1])
+	userPort = (serverPorts[serial])[0:strings.Index(serverPorts[serial], "!")] + ":50056"
+	r := Elect(serverPorts[serial], int32(serial))
 	for {
 		if r == "elect" {
-			r = Elect(port, serverMap[port])
+			r = Elect(serverPorts[serial], int32(serial))
 		} else if r == "lead" {
-			r = Lead(port)
+			r = Lead(serverPorts[serial])
 		} else if r == "follow" {
-			r = Follow(port)
+			r = Follow(serverPorts[serial])
 		}
 	}
 }

@@ -157,6 +157,7 @@ func Lead(port string) string {
 	// wait for quorum dead and cleanup signal
 	<-universalCleanupHolder
 
+	fs.Stop()
 	ls.Stop()
 	return "elect"
 }

@@ -92,7 +92,7 @@ func main() {
 	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
 	serial, _ := strconv.Atoi(os.Args[1])
-	userPort = (serverPorts[serial])[0:strings.Index(serverPorts[serial], "!")] + ":50056"
+	userPort = (serverPorts[serial])[0:strings.Index(serverPorts[serial], ":")] + ":50056"
 	r := Elect(serverPorts[serial], int32(serial))
 	for {
 		if r == "elect" {

@@ -33,7 +33,7 @@ var (
 	fs *grpc.Server
 
 	// Constants
-	userPort    string
+	portForUser string
 	serverPorts = []string{"128.110.217.123:50051", "128.110.217.125:50052", "128.110.217.140:50053", "128.110.217.135:50054", "128.110.217.127:50055"}
 	// Global channcels for broadcast-phase leader
 	propChannels   [nodeNum]chan *pb.PropTxn
@@ -97,8 +97,9 @@ func main() {
 	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
 	serial, _ := strconv.Atoi(os.Args[1])
-	userPort = (serverPorts[serial])[0:strings.Index(serverPorts[serial], ":")] + ":50056"
-	serveV(serverPorts[serial])
+	portForUser = (serverPorts[serial])[0:strings.Index(serverPorts[serial], ":")] + ":50056"
+	go serveV(serverPorts[serial])
+	voterPauseChannel = make(chan bool, 2)
 	go voterPauseUpdateRoutine()
 	voterPauseChannel <- true
 	r := Elect(serverPorts[serial], int32(serial))
@@ -174,7 +175,7 @@ func Lead(port string) string {
 // Register leader's grpc server exposed to user
 func serveL() {
 	// listen user
-	lis, err := net.Listen("tcp", userPort)
+	lis, err := net.Listen("tcp", portForUser)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}

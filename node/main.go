@@ -25,7 +25,7 @@ type Ack struct {
 	counter int32
 }
 
-const nodeNum = 5 // <--------------- NUMBER OF NODES
+const nodeNum = 5 // <--------------- NUMBER OF SERVER NODES
 
 var (
 	vs *grpc.Server
@@ -65,6 +65,10 @@ var (
 
 	//	for leader's use to clean up everything
 	universalCleanupHolder chan int32
+
+	// uses to pause and resume voter service handlers
+	voterPaused       = true
+	voterPauseChannel chan bool
 )
 
 type leaderServer struct {
@@ -94,6 +98,9 @@ func main() {
 	dStruct = make(map[string]int32)
 	serial, _ := strconv.Atoi(os.Args[1])
 	userPort = (serverPorts[serial])[0:strings.Index(serverPorts[serial], ":")] + ":50056"
+	serveV(serverPorts[serial])
+	go voterPauseUpdateRoutine()
+	voterPauseChannel <- true
 	r := Elect(serverPorts[serial], int32(serial))
 	for {
 		if r == "elect" {
@@ -181,6 +188,9 @@ func serveL() {
 
 // Voter's Handler: implementation of AskVote handler
 func (s *voterServer) AskVote(ctx context.Context, in *pb.Epoch) (*pb.Vote, error) {
+	if voterPaused {
+		return nil, status.Error(codes.PermissionDenied, "voter server is paused")
+	}
 	log.Printf("Voter received candidate vote request")
 	select {
 	case <-voted:
@@ -196,6 +206,9 @@ func (s *voterServer) AskVote(ctx context.Context, in *pb.Epoch) (*pb.Vote, erro
 
 // Voter's Handler: implementation of NEWEPOCH handler
 func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.EpochHist, error) {
+	if voterPaused {
+		return nil, status.Error(codes.PermissionDenied, "voter server is paused")
+	}
 	// check new epoch
 	if lastEpochProp >= in.GetEpoch() {
 		return nil, status.Errorf(codes.InvalidArgument,
@@ -208,6 +221,9 @@ func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.EpochHist
 
 // Voter's Handler: implementation of NEWLEADER handler
 func (s *voterServer) NewLeader(ctx context.Context, in *pb.EpochHist) (*pb.Vote, error) {
+	if voterPaused {
+		return nil, status.Error(codes.PermissionDenied, "voter server is paused")
+	}
 	// check new leader's epoch
 	if in.GetEpoch() != lastEpochProp {
 		followerHolder <- false
@@ -225,7 +241,9 @@ func (s *voterServer) NewLeader(ctx context.Context, in *pb.EpochHist) (*pb.Vote
 
 // Voter's Handler: implementation of CommitNewLeader handler
 func (s *voterServer) CommitNewLeader(ctx context.Context, in *pb.Epoch) (*pb.Empty, error) {
-
+	if voterPaused {
+		return nil, status.Error(codes.PermissionDenied, "voter server is paused")
+	}
 	if in.GetEpoch() != lastLeaderProp {
 		return &pb.Empty{}, nil // this is simply for prevent delayed delivery of messeges from previous leader
 		// do not need to abort here, simply ignore it
@@ -245,9 +263,7 @@ func Elect(port string, serial int32) string {
 	votedBuffer = make(chan int32, 1)
 	followerHolder = make(chan bool, 1)
 	voted <- 0
-
-	go serveV(port)
-
+	voterPauseChannel <- false
 	rand.Seed(time.Now().UnixNano())
 	n := rand.Intn(10)*300 + 600 // n will be between 600 and 1500
 	// time to check
@@ -300,7 +316,7 @@ func Elect(port string, serial int32) string {
 			for i := 0; i < 4; i++ {
 				electionHolder <- stateEpoch{false, -1}
 			}
-			vs.Stop()
+			voterPauseChannel <- true
 			return "elect"
 		} else {
 			log.Printf("lifting election holder...")
@@ -332,7 +348,7 @@ func Elect(port string, serial int32) string {
 			for i := 0; i < 4; i++ {
 				synchronizationHolder <- stateHist{false, []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}}
 			}
-			vs.Stop()
+			voterPauseChannel <- true
 			return "elect"
 		} else {
 			log.Printf("lifting synchronization holder...")
@@ -358,7 +374,7 @@ func Elect(port string, serial int32) string {
 			for i := 0; i < 4; i++ {
 				commitldHolder <- false
 			}
-			vs.Stop()
+			voterPauseChannel <- true
 			return "elect"
 		} else {
 			log.Printf("lifting commit holder...")
@@ -368,23 +384,23 @@ func Elect(port string, serial int32) string {
 		}
 
 		log.Printf("proceeding to phase 3 as an estabilished leader...")
-		vs.Stop()
+		voterPauseChannel <- true
 		return "lead"
 	case <-votedBuffer:
 		select {
 		case r := <-followerHolder:
 			if !r {
 				log.Printf("followerHolder returned false, restarting election...")
-				vs.Stop()
+				voterPauseChannel <- true
 				return "elect"
 			}
 
 			log.Printf("proceeding to phase 3 as a follower...")
-			vs.Stop()
+			voterPauseChannel <- true
 			return "follow"
 		case <-time.After(6 * time.Second):
 			log.Printf("time out, restarting election...")
-			vs.Stop()
+			voterPauseChannel <- true
 			return "elect"
 		}
 	}
@@ -519,7 +535,7 @@ func serveV(port string) {
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
-	log.Printf("voter listening at %v", lis.Addr())
+	log.Printf("voter server start listening at %v", lis.Addr())
 	vs = grpc.NewServer()
 	pb.RegisterVoterCandidateServer(vs, &voterServer{})
 	if err := vs.Serve(lis); err != nil {
@@ -753,5 +769,12 @@ func upFollowersUpdateRoutine() {
 				return
 			}
 		}
+	}
+}
+
+func voterPauseUpdateRoutine() {
+	for {
+		newState := <-voterPauseChannel
+		voterPaused = newState
 	}
 }

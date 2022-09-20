@@ -60,6 +60,7 @@ var (
 	dStruct  map[string]int32
 
 	voted          chan int32
+	votedBuffer    chan int32
 	followerHolder chan bool
 
 	//	for leader's use to clean up everything
@@ -184,6 +185,7 @@ func (s *voterServer) AskVote(ctx context.Context, in *pb.Epoch) (*pb.Vote, erro
 	select {
 	case <-voted:
 		log.Printf("not voted yet, now vote")
+		votedBuffer <- 1
 		return &pb.Vote{Voted: true}, nil
 	default:
 		log.Printf("voted, do not vote")
@@ -240,24 +242,19 @@ func (s *voterServer) CommitNewLeader(ctx context.Context, in *pb.Epoch) (*pb.Em
 
 func Elect(port string, serial int32) string {
 	voted = make(chan int32, 1)
+	votedBuffer = make(chan int32, 1)
 	followerHolder = make(chan bool, 1)
 	voted <- 0
 
-	sleepHolder := make(chan int32, 1)
-
-	go serveV(port, sleepHolder)
-
-	<-sleepHolder // make sure service established before go to sleep
+	go serveV(port)
 
 	rand.Seed(time.Now().UnixNano())
-	n := rand.Intn(10)*100 + 600 // n will be between 600 and 1500
-	log.Printf("entering random sleep...")
-	time.Sleep(time.Duration(n) * time.Millisecond)
-	log.Printf("woke up: %v", time.Duration(n)*time.Millisecond)
+	n := rand.Intn(10)*300 + 600 // n will be between 600 and 1500
 	// time to check
 	select {
-	case <-voted:
+	case <-time.After(time.Duration(n) * time.Millisecond):
 		// didn't receive request, try to be leader
+		<-voted
 		log.Printf("voted to my self")
 
 		// initialize synchronization channels
@@ -373,7 +370,7 @@ func Elect(port string, serial int32) string {
 		log.Printf("proceeding to phase 3 as an estabilished leader...")
 		vs.Stop()
 		return "lead"
-	default:
+	case <-votedBuffer:
 		select {
 		case r := <-followerHolder:
 			if !r {
@@ -516,7 +513,7 @@ func newepochHelper(port string, epoch int32, ackeResultChannel chan stateHist, 
 }
 
 // Register voter's grpc server exposed to potential leader
-func serveV(port string, sleepHolder chan int32) {
+func serveV(port string) {
 	// listen port
 	lis, err := net.Listen("tcp", port)
 	if err != nil {
@@ -525,7 +522,6 @@ func serveV(port string, sleepHolder chan int32) {
 	log.Printf("voter listening at %v", lis.Addr())
 	vs = grpc.NewServer()
 	pb.RegisterVoterCandidateServer(vs, &voterServer{})
-	sleepHolder <- 0
 	if err := vs.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}

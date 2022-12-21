@@ -34,7 +34,10 @@
 - for all prior <Broadcast, PropTxn{epoch, Txn{vec, zxid}}> AND <Commit, CommitTxn{content, epoch}> sent, `lastEpoch` >= epoch
 - inference: this node is the current leader, with epoch `lastEpoch`
 
-### node outgoing message <CommitNewLeader, Epoch{epoch}>
+### node outgoing message <NewLeader, EpochHist{`lastEpoch`, PropTxn[]}>
+- for all {EpochHist{epoch', PropTxn'[]} reply the node received | `lastEpoch` == epoch'}, PropTxn[] is as new as or newer than PropTxn'[]
+
+### node outgoing message <CommitNewLeader, Epoch{`lastEpoch`}>
 - for all prior <CommitNewLeader, Epoch{epoch}> sent, `lastEpoch` > epoch
 - inference: this node will be the next leader
 - assertion: no two leaders can exist with the same epoch

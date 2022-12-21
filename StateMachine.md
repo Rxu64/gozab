@@ -11,20 +11,30 @@
 - `lastLeaderProp`: Last new leader proposal follower f acknowledged, initially ⊥
 
 ## Transition functions
+### Follower
 | curr_state              | incoming_message                             | next_state                                                                                          |
 |-------------------------|----------------------------------------------|-----------------------------------------------------------------------------------------------------|
-|                         | Broadcast{lastEpoch, Transaction{vec, zxid}} | append Transaction{vec, zxid} to `pStorage`                                                           |
-| epoch == `lastLeaderProp` | Commit{epoch}                                | apply the last Transaction{vec, zxid} to `dStruct`                                                   |
-| `lastEpochProp` < epoch   | NewEpoch{epoch}                              | `lastEpochProp` = epoch                                                                               |
-|                         | NewLeader{epoch, hist}                       | `lastLeaderProp` = epoch<br> `pStorage` = hist<br> each transaction's epoch in `pStorage` is set to epoch |
-| epoch == `lastLeaderProp` | CommitNewLeader{epoch}                       | re-apply all the Transaction{vec, zxid} in pStorage to `dStruct`                                      |
-## Predicates
-### node outgoing message Broadcast{`lastEpoch`, Transaction{vec, `zxid`}}
-- this node is currently the leader
-- node must received Store{vec} from user
-- `zxid` cannot decrease
+| `lastLeaderProp` == epoch   | <Broadcast, PropTxn{epoch, Txn{vec, zxid}}> | append PropTxn{epoch, Txn{vec, zxid}} to `pStorage`                                                           |
+| `lastLeaderProp` == epoch | <Commit, CommitTxn{epoch}>                                | apply the latest transaction in `pStorage` to `dStruct`                                                   |
 
-### node outgoing message Commit{content, `lastEpoch`}
-- this node is currently the leader
-- `lastEpoch` cannot decrease
+### Candidate
+| curr_state              | incoming_message                             | next_state                                                                                          |
+|-------------------------|----------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `lastEpochProp` < epoch   | <NewEpoch, Epoch{epoch}>                             | `lastEpochProp` = epoch                                                                               |
+| `lastEpochProp` == epoch   | <NewLeader, EpochHist{epoch, PropTxn[]}>                      | `lastLeaderProp` = epoch<br>`pStorage` = PropTxn[]<br>each transaction's epoch in `pStorage` is set to epoch |
+| `lastLeaderProp` == epoch | <CommitNewLeader, Epoch{epoch}>                      | re-apply all the transactions in `pStorage` to `dStruct`                                      |
+## Predicates
+### node outgoing message <Broadcast, PropTxn{`lastEpoch`, Txn{vec, `zxid`}}>
+- node must received Store{vec} from user
+- for all prior <Broadcast, PropTxn{epoch, Txn{vec, zxid}}> AND <Commit, CommitTxn{content, epoch}> sent, `lastEpoch` >= epoch AND `zxid` >= zxid
+- inference: this node is the current leader, with zxid `zxid`
+
+### node outgoing message <Commit, CommitTxn{content, `lastEpoch`}>
 - node must received valid AckTxn{} reply from a quorum of followers
+- for all prior <Broadcast, PropTxn{epoch, Txn{vec, zxid}}> AND <Commit, CommitTxn{content, epoch}> sent, `lastEpoch` >= epoch
+- inference: this node is the current leader, with epoch `lastEpoch`
+
+### node outgoing message <CommitNewLeader, Epoch{epoch}>
+- for all prior <CommitNewLeader, Epoch{epoch}> sent, `lastEpoch` > epoch
+- inference: this node will be the next leader
+- assertion: no two leaders can exist with the same epoch

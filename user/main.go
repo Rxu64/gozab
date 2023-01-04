@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	serverPorts = []string{"localhost:50056", "localhost:50056", "localhost:50056", "localhost:50056", "localhost:50056"}
+	serverPorts = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
 )
 
 func main() {

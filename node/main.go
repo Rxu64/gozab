@@ -34,7 +34,7 @@ var (
 
 	// Constants
 	portForUser string
-	serverPorts = []string{"128.110.217.123:50051", "128.110.217.125:50052", "128.110.217.140:50053", "128.110.217.135:50054", "128.110.217.127:50055"}
+	serverPorts = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
 	// Global channcels for broadcast-phase leader
 	propChannels   [nodeNum]chan *pb.PropTxn
 	commitChannels [nodeNum]chan *pb.CommitTxn
@@ -98,7 +98,6 @@ func main() {
 	dStruct = make(map[string]int32)
 	serial, _ := strconv.Atoi(os.Args[1])
 	portForUser = (serverPorts[serial])[0:strings.Index(serverPorts[serial], ":")] + ":50056"
-	go serveV(serverPorts[serial])
 	voterPauseChannel = make(chan bool, 2)
 	go voterPauseUpdateRoutine()
 	voterPauseChannel <- true
@@ -265,6 +264,7 @@ func Elect(port string, serial int32) string {
 	followerHolder = make(chan bool, 1)
 	voted <- 0
 	voterPauseChannel <- false
+	go serveV(port)
 	rand.Seed(time.Now().UnixNano())
 	n := rand.Intn(10)*300 + 600 // n will be between 600 and 1500
 	// time to check
@@ -318,6 +318,7 @@ func Elect(port string, serial int32) string {
 				electionHolder <- stateEpoch{false, -1}
 			}
 			voterPauseChannel <- true
+			vs.Stop()
 			return "elect"
 		} else {
 			log.Printf("lifting election holder...")
@@ -350,6 +351,7 @@ func Elect(port string, serial int32) string {
 				synchronizationHolder <- stateHist{false, []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}}
 			}
 			voterPauseChannel <- true
+			vs.Stop()
 			return "elect"
 		} else {
 			log.Printf("lifting synchronization holder...")
@@ -376,6 +378,7 @@ func Elect(port string, serial int32) string {
 				commitldHolder <- false
 			}
 			voterPauseChannel <- true
+			vs.Stop()
 			return "elect"
 		} else {
 			log.Printf("lifting commit holder...")
@@ -386,6 +389,7 @@ func Elect(port string, serial int32) string {
 
 		log.Printf("proceeding to phase 3 as an estabilished leader...")
 		voterPauseChannel <- true
+		vs.Stop()
 		return "lead"
 	case <-votedBuffer:
 		select {
@@ -393,15 +397,18 @@ func Elect(port string, serial int32) string {
 			if !r {
 				log.Printf("followerHolder returned false, restarting election...")
 				voterPauseChannel <- true
+				vs.Stop()
 				return "elect"
 			}
 
 			log.Printf("proceeding to phase 3 as a follower...")
 			voterPauseChannel <- true
+			vs.Stop()
 			return "follow"
 		case <-time.After(6 * time.Second):
 			log.Printf("time out, restarting election...")
 			voterPauseChannel <- true
+			vs.Stop()
 			return "elect"
 		}
 	}

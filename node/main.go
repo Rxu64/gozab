@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	pb "gozab/gozab"
@@ -97,7 +96,7 @@ func main() {
 	pStorage = make([]*pb.PropTxn, 0)
 	dStruct = make(map[string]int32)
 	serial, _ := strconv.Atoi(os.Args[1])
-	portForUser = (serverPorts[serial])[0:strings.Index(serverPorts[serial], ":")] + ":50056"
+	portForUser = "localhost:" + strconv.Itoa(serial+50056)
 	voterPauseChannel = make(chan bool, 2)
 	go voterPauseUpdateRoutine()
 	voterPauseChannel <- true

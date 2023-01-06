@@ -50,7 +50,7 @@ var (
 
 	// for leader convenience only
 	lastEpoch int32 = 0
-	lastCount int32 = 0
+	lastCount int32
 
 	// for follower use
 	lastEpochProp  int32 = 0
@@ -136,6 +136,7 @@ func (s *leaderServer) Identify(ctx context.Context, in *pb.Empty) (*pb.Vote, er
 }
 
 func Lead(port string) string {
+	lastCount = 0
 
 	for i := 0; i < nodeNum; i++ {
 		propChannels[i] = make(chan *pb.PropTxn, 1)

@@ -5,6 +5,8 @@ import (
 )
 
 type State struct {
+	currRole int32 // 0 for candidate; 1 for leader; 2 for follower
+
 	// follower states
 	pStorage []*pb.PropTxn
 	dStruct  map[string]int32
@@ -18,18 +20,23 @@ type State struct {
 	proposals []*pb.PropTxn
 }
 
-// leader functions
+func Apply(s State, msg *pb.Empty) {
+
+}
+
+// LEADER receive from client
 func (s *State) StoreTransformation(message *pb.Vec) {
 	s.proposals = append(s.proposals, &pb.PropTxn{E: s.lastEpoch, Transaction: &pb.Txn{V: message, Z: &pb.Zxid{Epoch: s.lastEpoch, Counter: -1}}})
 }
 
+// LEADER receive from follower
 func (s *State) AckTransformation(message *pb.AckTxn) {
 	if message.Content == "I Acknowledged" {
 		s.ackcnt++
 	}
 }
 
-// follower functions
+// FOLLOWER receive from leader
 func (s *State) BroadcastTransformation(message *pb.PropTxn) {
 	if s.lastLeaderProp == message.E {
 		s.pStorage = append(s.pStorage, message)
@@ -42,7 +49,7 @@ func (s *State) CommitTransformation(message *pb.CommitTxn) {
 	}
 }
 
-// candidate functions
+// CANDIDATE receive from candidate
 func (s *State) NewEpochTransformation(message *pb.Epoch) {
 	if s.lastEpochProp < message.Epoch {
 		s.lastEpochProp = message.Epoch
@@ -65,23 +72,4 @@ func (s *State) CommitNewLeaderTransformation(message *pb.Epoch) {
 			s.dStruct[v.Transaction.V.Key] = v.Transaction.V.Value
 		}
 	}
-}
-
-type LeaderPartialState struct {
-	pStorage []*pb.PropTxn
-	dStruct  map[string]int32
-
-	epoch   int32
-	counter int32
-}
-
-func BroadcastInference(message *pb.PropTxn) LeaderPartialState {
-	return LeaderPartialState{pStorage: nil, dStruct: nil, epoch: message.Transaction.Z.Epoch, counter: message.Transaction.Z.Counter}
-}
-
-func CommitInference(message *pb.CommitTxn) LeaderPartialState {
-	return LeaderPartialState{pStorage: nil, dStruct: nil, epoch: message.Epoch, counter: -1}
-}
-
-type CandidatePartialState struct {
 }

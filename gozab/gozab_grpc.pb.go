@@ -22,9 +22,9 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type FollowerLeaderClient interface {
-	Broadcast(ctx context.Context, in *PropTxn, opts ...grpc.CallOption) (*AckTxn, error)
-	Commit(ctx context.Context, in *CommitTxn, opts ...grpc.CallOption) (*Empty, error)
-	HeartBeat(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
+	Broadcast(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error)
+	Commit(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error)
+	HeartBeat(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error)
 }
 
 type followerLeaderClient struct {
@@ -35,8 +35,8 @@ func NewFollowerLeaderClient(cc grpc.ClientConnInterface) FollowerLeaderClient {
 	return &followerLeaderClient{cc}
 }
 
-func (c *followerLeaderClient) Broadcast(ctx context.Context, in *PropTxn, opts ...grpc.CallOption) (*AckTxn, error) {
-	out := new(AckTxn)
+func (c *followerLeaderClient) Broadcast(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error) {
+	out := new(Message)
 	err := c.cc.Invoke(ctx, "/gozab.FollowerLeader/Broadcast", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -44,8 +44,8 @@ func (c *followerLeaderClient) Broadcast(ctx context.Context, in *PropTxn, opts 
 	return out, nil
 }
 
-func (c *followerLeaderClient) Commit(ctx context.Context, in *CommitTxn, opts ...grpc.CallOption) (*Empty, error) {
-	out := new(Empty)
+func (c *followerLeaderClient) Commit(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error) {
+	out := new(Message)
 	err := c.cc.Invoke(ctx, "/gozab.FollowerLeader/Commit", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -53,8 +53,8 @@ func (c *followerLeaderClient) Commit(ctx context.Context, in *CommitTxn, opts .
 	return out, nil
 }
 
-func (c *followerLeaderClient) HeartBeat(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error) {
-	out := new(Empty)
+func (c *followerLeaderClient) HeartBeat(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error) {
+	out := new(Message)
 	err := c.cc.Invoke(ctx, "/gozab.FollowerLeader/HeartBeat", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -66,9 +66,9 @@ func (c *followerLeaderClient) HeartBeat(ctx context.Context, in *Empty, opts ..
 // All implementations must embed UnimplementedFollowerLeaderServer
 // for forward compatibility
 type FollowerLeaderServer interface {
-	Broadcast(context.Context, *PropTxn) (*AckTxn, error)
-	Commit(context.Context, *CommitTxn) (*Empty, error)
-	HeartBeat(context.Context, *Empty) (*Empty, error)
+	Broadcast(context.Context, *Message) (*Message, error)
+	Commit(context.Context, *Message) (*Message, error)
+	HeartBeat(context.Context, *Message) (*Message, error)
 	mustEmbedUnimplementedFollowerLeaderServer()
 }
 
@@ -76,13 +76,13 @@ type FollowerLeaderServer interface {
 type UnimplementedFollowerLeaderServer struct {
 }
 
-func (UnimplementedFollowerLeaderServer) Broadcast(context.Context, *PropTxn) (*AckTxn, error) {
+func (UnimplementedFollowerLeaderServer) Broadcast(context.Context, *Message) (*Message, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Broadcast not implemented")
 }
-func (UnimplementedFollowerLeaderServer) Commit(context.Context, *CommitTxn) (*Empty, error) {
+func (UnimplementedFollowerLeaderServer) Commit(context.Context, *Message) (*Message, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Commit not implemented")
 }
-func (UnimplementedFollowerLeaderServer) HeartBeat(context.Context, *Empty) (*Empty, error) {
+func (UnimplementedFollowerLeaderServer) HeartBeat(context.Context, *Message) (*Message, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HeartBeat not implemented")
 }
 func (UnimplementedFollowerLeaderServer) mustEmbedUnimplementedFollowerLeaderServer() {}
@@ -99,7 +99,7 @@ func RegisterFollowerLeaderServer(s grpc.ServiceRegistrar, srv FollowerLeaderSer
 }
 
 func _FollowerLeader_Broadcast_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PropTxn)
+	in := new(Message)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -111,13 +111,13 @@ func _FollowerLeader_Broadcast_Handler(srv interface{}, ctx context.Context, dec
 		FullMethod: "/gozab.FollowerLeader/Broadcast",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(FollowerLeaderServer).Broadcast(ctx, req.(*PropTxn))
+		return srv.(FollowerLeaderServer).Broadcast(ctx, req.(*Message))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _FollowerLeader_Commit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CommitTxn)
+	in := new(Message)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -129,13 +129,13 @@ func _FollowerLeader_Commit_Handler(srv interface{}, ctx context.Context, dec fu
 		FullMethod: "/gozab.FollowerLeader/Commit",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(FollowerLeaderServer).Commit(ctx, req.(*CommitTxn))
+		return srv.(FollowerLeaderServer).Commit(ctx, req.(*Message))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _FollowerLeader_HeartBeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Empty)
+	in := new(Message)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func _FollowerLeader_HeartBeat_Handler(srv interface{}, ctx context.Context, dec
 		FullMethod: "/gozab.FollowerLeader/HeartBeat",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(FollowerLeaderServer).HeartBeat(ctx, req.(*Empty))
+		return srv.(FollowerLeaderServer).HeartBeat(ctx, req.(*Message))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -180,9 +180,9 @@ var FollowerLeader_ServiceDesc = grpc.ServiceDesc{
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LeaderUserClient interface {
-	Store(ctx context.Context, in *Vec, opts ...grpc.CallOption) (*Empty, error)
-	Retrieve(ctx context.Context, in *GetTxn, opts ...grpc.CallOption) (*ResultTxn, error)
-	Identify(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Vote, error)
+	Store(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error)
+	Retrieve(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error)
+	Identify(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error)
 }
 
 type leaderUserClient struct {
@@ -193,8 +193,8 @@ func NewLeaderUserClient(cc grpc.ClientConnInterface) LeaderUserClient {
 	return &leaderUserClient{cc}
 }
 
-func (c *leaderUserClient) Store(ctx context.Context, in *Vec, opts ...grpc.CallOption) (*Empty, error) {
-	out := new(Empty)
+func (c *leaderUserClient) Store(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error) {
+	out := new(Message)
 	err := c.cc.Invoke(ctx, "/gozab.LeaderUser/Store", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -202,8 +202,8 @@ func (c *leaderUserClient) Store(ctx context.Context, in *Vec, opts ...grpc.Call
 	return out, nil
 }
 
-func (c *leaderUserClient) Retrieve(ctx context.Context, in *GetTxn, opts ...grpc.CallOption) (*ResultTxn, error) {
-	out := new(ResultTxn)
+func (c *leaderUserClient) Retrieve(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error) {
+	out := new(Message)
 	err := c.cc.Invoke(ctx, "/gozab.LeaderUser/Retrieve", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -211,8 +211,8 @@ func (c *leaderUserClient) Retrieve(ctx context.Context, in *GetTxn, opts ...grp
 	return out, nil
 }
 
-func (c *leaderUserClient) Identify(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Vote, error) {
-	out := new(Vote)
+func (c *leaderUserClient) Identify(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error) {
+	out := new(Message)
 	err := c.cc.Invoke(ctx, "/gozab.LeaderUser/Identify", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -224,9 +224,9 @@ func (c *leaderUserClient) Identify(ctx context.Context, in *Empty, opts ...grpc
 // All implementations must embed UnimplementedLeaderUserServer
 // for forward compatibility
 type LeaderUserServer interface {
-	Store(context.Context, *Vec) (*Empty, error)
-	Retrieve(context.Context, *GetTxn) (*ResultTxn, error)
-	Identify(context.Context, *Empty) (*Vote, error)
+	Store(context.Context, *Message) (*Message, error)
+	Retrieve(context.Context, *Message) (*Message, error)
+	Identify(context.Context, *Message) (*Message, error)
 	mustEmbedUnimplementedLeaderUserServer()
 }
 
@@ -234,13 +234,13 @@ type LeaderUserServer interface {
 type UnimplementedLeaderUserServer struct {
 }
 
-func (UnimplementedLeaderUserServer) Store(context.Context, *Vec) (*Empty, error) {
+func (UnimplementedLeaderUserServer) Store(context.Context, *Message) (*Message, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Store not implemented")
 }
-func (UnimplementedLeaderUserServer) Retrieve(context.Context, *GetTxn) (*ResultTxn, error) {
+func (UnimplementedLeaderUserServer) Retrieve(context.Context, *Message) (*Message, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Retrieve not implemented")
 }
-func (UnimplementedLeaderUserServer) Identify(context.Context, *Empty) (*Vote, error) {
+func (UnimplementedLeaderUserServer) Identify(context.Context, *Message) (*Message, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Identify not implemented")
 }
 func (UnimplementedLeaderUserServer) mustEmbedUnimplementedLeaderUserServer() {}
@@ -257,7 +257,7 @@ func RegisterLeaderUserServer(s grpc.ServiceRegistrar, srv LeaderUserServer) {
 }
 
 func _LeaderUser_Store_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Vec)
+	in := new(Message)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -269,13 +269,13 @@ func _LeaderUser_Store_Handler(srv interface{}, ctx context.Context, dec func(in
 		FullMethod: "/gozab.LeaderUser/Store",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LeaderUserServer).Store(ctx, req.(*Vec))
+		return srv.(LeaderUserServer).Store(ctx, req.(*Message))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _LeaderUser_Retrieve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetTxn)
+	in := new(Message)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -287,13 +287,13 @@ func _LeaderUser_Retrieve_Handler(srv interface{}, ctx context.Context, dec func
 		FullMethod: "/gozab.LeaderUser/Retrieve",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LeaderUserServer).Retrieve(ctx, req.(*GetTxn))
+		return srv.(LeaderUserServer).Retrieve(ctx, req.(*Message))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _LeaderUser_Identify_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Empty)
+	in := new(Message)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -305,7 +305,7 @@ func _LeaderUser_Identify_Handler(srv interface{}, ctx context.Context, dec func
 		FullMethod: "/gozab.LeaderUser/Identify",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LeaderUserServer).Identify(ctx, req.(*Empty))
+		return srv.(LeaderUserServer).Identify(ctx, req.(*Message))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -338,10 +338,10 @@ var LeaderUser_ServiceDesc = grpc.ServiceDesc{
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type VoterCandidateClient interface {
-	AskVote(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*Vote, error)
-	NewEpoch(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*EpochHist, error)
-	NewLeader(ctx context.Context, in *EpochHist, opts ...grpc.CallOption) (*Vote, error)
-	CommitNewLeader(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*Empty, error)
+	AskVote(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error)
+	NewEpoch(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error)
+	NewLeader(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error)
+	CommitNewLeader(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error)
 }
 
 type voterCandidateClient struct {
@@ -352,8 +352,8 @@ func NewVoterCandidateClient(cc grpc.ClientConnInterface) VoterCandidateClient {
 	return &voterCandidateClient{cc}
 }
 
-func (c *voterCandidateClient) AskVote(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*Vote, error) {
-	out := new(Vote)
+func (c *voterCandidateClient) AskVote(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error) {
+	out := new(Message)
 	err := c.cc.Invoke(ctx, "/gozab.VoterCandidate/AskVote", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -361,8 +361,8 @@ func (c *voterCandidateClient) AskVote(ctx context.Context, in *Epoch, opts ...g
 	return out, nil
 }
 
-func (c *voterCandidateClient) NewEpoch(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*EpochHist, error) {
-	out := new(EpochHist)
+func (c *voterCandidateClient) NewEpoch(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error) {
+	out := new(Message)
 	err := c.cc.Invoke(ctx, "/gozab.VoterCandidate/NewEpoch", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -370,8 +370,8 @@ func (c *voterCandidateClient) NewEpoch(ctx context.Context, in *Epoch, opts ...
 	return out, nil
 }
 
-func (c *voterCandidateClient) NewLeader(ctx context.Context, in *EpochHist, opts ...grpc.CallOption) (*Vote, error) {
-	out := new(Vote)
+func (c *voterCandidateClient) NewLeader(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error) {
+	out := new(Message)
 	err := c.cc.Invoke(ctx, "/gozab.VoterCandidate/NewLeader", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -379,8 +379,8 @@ func (c *voterCandidateClient) NewLeader(ctx context.Context, in *EpochHist, opt
 	return out, nil
 }
 
-func (c *voterCandidateClient) CommitNewLeader(ctx context.Context, in *Epoch, opts ...grpc.CallOption) (*Empty, error) {
-	out := new(Empty)
+func (c *voterCandidateClient) CommitNewLeader(ctx context.Context, in *Message, opts ...grpc.CallOption) (*Message, error) {
+	out := new(Message)
 	err := c.cc.Invoke(ctx, "/gozab.VoterCandidate/CommitNewLeader", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -392,10 +392,10 @@ func (c *voterCandidateClient) CommitNewLeader(ctx context.Context, in *Epoch, o
 // All implementations must embed UnimplementedVoterCandidateServer
 // for forward compatibility
 type VoterCandidateServer interface {
-	AskVote(context.Context, *Epoch) (*Vote, error)
-	NewEpoch(context.Context, *Epoch) (*EpochHist, error)
-	NewLeader(context.Context, *EpochHist) (*Vote, error)
-	CommitNewLeader(context.Context, *Epoch) (*Empty, error)
+	AskVote(context.Context, *Message) (*Message, error)
+	NewEpoch(context.Context, *Message) (*Message, error)
+	NewLeader(context.Context, *Message) (*Message, error)
+	CommitNewLeader(context.Context, *Message) (*Message, error)
 	mustEmbedUnimplementedVoterCandidateServer()
 }
 
@@ -403,16 +403,16 @@ type VoterCandidateServer interface {
 type UnimplementedVoterCandidateServer struct {
 }
 
-func (UnimplementedVoterCandidateServer) AskVote(context.Context, *Epoch) (*Vote, error) {
+func (UnimplementedVoterCandidateServer) AskVote(context.Context, *Message) (*Message, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AskVote not implemented")
 }
-func (UnimplementedVoterCandidateServer) NewEpoch(context.Context, *Epoch) (*EpochHist, error) {
+func (UnimplementedVoterCandidateServer) NewEpoch(context.Context, *Message) (*Message, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NewEpoch not implemented")
 }
-func (UnimplementedVoterCandidateServer) NewLeader(context.Context, *EpochHist) (*Vote, error) {
+func (UnimplementedVoterCandidateServer) NewLeader(context.Context, *Message) (*Message, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NewLeader not implemented")
 }
-func (UnimplementedVoterCandidateServer) CommitNewLeader(context.Context, *Epoch) (*Empty, error) {
+func (UnimplementedVoterCandidateServer) CommitNewLeader(context.Context, *Message) (*Message, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CommitNewLeader not implemented")
 }
 func (UnimplementedVoterCandidateServer) mustEmbedUnimplementedVoterCandidateServer() {}
@@ -429,7 +429,7 @@ func RegisterVoterCandidateServer(s grpc.ServiceRegistrar, srv VoterCandidateSer
 }
 
 func _VoterCandidate_AskVote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Epoch)
+	in := new(Message)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -441,13 +441,13 @@ func _VoterCandidate_AskVote_Handler(srv interface{}, ctx context.Context, dec f
 		FullMethod: "/gozab.VoterCandidate/AskVote",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(VoterCandidateServer).AskVote(ctx, req.(*Epoch))
+		return srv.(VoterCandidateServer).AskVote(ctx, req.(*Message))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _VoterCandidate_NewEpoch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Epoch)
+	in := new(Message)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -459,13 +459,13 @@ func _VoterCandidate_NewEpoch_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: "/gozab.VoterCandidate/NewEpoch",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(VoterCandidateServer).NewEpoch(ctx, req.(*Epoch))
+		return srv.(VoterCandidateServer).NewEpoch(ctx, req.(*Message))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _VoterCandidate_NewLeader_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(EpochHist)
+	in := new(Message)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -477,13 +477,13 @@ func _VoterCandidate_NewLeader_Handler(srv interface{}, ctx context.Context, dec
 		FullMethod: "/gozab.VoterCandidate/NewLeader",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(VoterCandidateServer).NewLeader(ctx, req.(*EpochHist))
+		return srv.(VoterCandidateServer).NewLeader(ctx, req.(*Message))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _VoterCandidate_CommitNewLeader_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Epoch)
+	in := new(Message)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -495,7 +495,7 @@ func _VoterCandidate_CommitNewLeader_Handler(srv interface{}, ctx context.Contex
 		FullMethod: "/gozab.VoterCandidate/CommitNewLeader",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(VoterCandidateServer).CommitNewLeader(ctx, req.(*Epoch))
+		return srv.(VoterCandidateServer).CommitNewLeader(ctx, req.(*Message))
 	}
 	return interceptor(ctx, in, info, handler)
 }

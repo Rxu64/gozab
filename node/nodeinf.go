@@ -12,11 +12,11 @@ type LeaderPartialState struct {
 	counter int32
 }
 
-func BroadcastInference(message *pb.PropTxn) LeaderPartialState {
-	return LeaderPartialState{pStorage: nil, dStruct: nil, epoch: message.Transaction.Z.Epoch, counter: message.Transaction.Z.Counter}
+func BroadcastInference(message *pb.Message) LeaderPartialState {
+	return LeaderPartialState{pStorage: nil, dStruct: nil, epoch: message.Epoch, counter: message.Counter}
 }
 
-func CommitInference(message *pb.CommitTxn) LeaderPartialState {
+func CommitInference(message *pb.Message) LeaderPartialState {
 	return LeaderPartialState{pStorage: nil, dStruct: nil, epoch: message.Epoch, counter: -1}
 }
 

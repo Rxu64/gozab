@@ -27,6 +27,22 @@ type Ack struct {
 
 const nodeNum = 5 // <--------------- NUMBER OF SERVER NODES
 
+const (
+	EMPTY = 0
+	EPOCH = 1
+
+	PROP_TXN   = 2
+	ACK_TXN    = 3
+	COMMIT_TXN = 4
+
+	VEC   = 5
+	KEY   = 6
+	VALUE = 7
+
+	VOTE       = 8
+	EPOCH_HIST = 9
+)
+
 var (
 	vs *grpc.Server
 	ls *grpc.Server
@@ -36,8 +52,8 @@ var (
 	portForUser string
 	serverPorts = []string{"localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"}
 	// Global channcels for broadcast-phase leader
-	propChannels   [nodeNum]chan *pb.PropTxn
-	commitChannels [nodeNum]chan *pb.CommitTxn
+	propChannels   [nodeNum]chan *pb.Message
+	commitChannels [nodeNum]chan *pb.Message
 	ackChannel     chan Ack // size of nodeNum queue
 	beatChannel    chan int // size of nodeNum Channel
 
@@ -114,33 +130,33 @@ func main() {
 }
 
 // Leader's Handler: implementation of user Store handler
-func (s *leaderServer) Store(ctx context.Context, in *pb.Vec) (*pb.Empty, error) {
+func (s *leaderServer) Store(ctx context.Context, in *pb.Message) (*pb.Message, error) {
 	log.Printf("Leader received user request")
 	for i := 0; i < nodeNum; i++ {
-		propChannels[i] <- &pb.PropTxn{E: lastEpoch, Transaction: &pb.Txn{V: &pb.Vec{Key: in.GetKey(), Value: in.GetValue()}, Z: &pb.Zxid{Epoch: lastEpoch, Counter: lastCount}}}
+		propChannels[i] <- &pb.Message{Type: PROP_TXN, Epoch: lastEpoch, Transaction: &pb.Txn{V: &pb.Vec{Key: in.GetKey(), Value: in.GetValue()}, Z: &pb.Zxid{Epoch: lastEpoch, Counter: lastCount}}}
 	}
 	lastCount++
-	return &pb.Empty{Content: "Leader recieved your request"}, nil
+	return &pb.Message{Type: EMPTY, Content: "Leader recieved your request"}, nil
 }
 
 // Leader's Handler: implementation of user Retrieve handler
-func (s *leaderServer) Retrieve(ctx context.Context, in *pb.GetTxn) (*pb.ResultTxn, error) {
+func (s *leaderServer) Retrieve(ctx context.Context, in *pb.Message) (*pb.Message, error) {
 	log.Printf("Leader received user retrieve")
-	return &pb.ResultTxn{Value: dStruct[in.GetKey()]}, nil
+	return &pb.Message{Type: VALUE, Value: dStruct[in.GetKey()]}, nil
 }
 
 // Leader's Handler: implementation of user Identify handler
-func (s *leaderServer) Identify(ctx context.Context, in *pb.Empty) (*pb.Vote, error) {
+func (s *leaderServer) Identify(ctx context.Context, in *pb.Message) (*pb.Message, error) {
 	log.Printf("Leader received user identify")
-	return &pb.Vote{Voted: true}, nil
+	return &pb.Message{Type: VOTE, Voted: true}, nil
 }
 
 func Lead(port string) string {
 	lastCount = 0
 
 	for i := 0; i < nodeNum; i++ {
-		propChannels[i] = make(chan *pb.PropTxn, 1)
-		commitChannels[i] = make(chan *pb.CommitTxn, 1)
+		propChannels[i] = make(chan *pb.Message, 1)
+		commitChannels[i] = make(chan *pb.Message, 1)
 	}
 	ackChannel = make(chan Ack, nodeNum)
 
@@ -188,7 +204,7 @@ func serveL() {
 }
 
 // Voter's Handler: implementation of AskVote handler
-func (s *voterServer) AskVote(ctx context.Context, in *pb.Epoch) (*pb.Vote, error) {
+func (s *voterServer) AskVote(ctx context.Context, in *pb.Message) (*pb.Message, error) {
 	if voterPaused {
 		return nil, status.Error(codes.PermissionDenied, "voter server is paused")
 	}
@@ -197,16 +213,15 @@ func (s *voterServer) AskVote(ctx context.Context, in *pb.Epoch) (*pb.Vote, erro
 	case <-voted:
 		log.Printf("not voted yet, now vote")
 		votedBuffer <- 1
-		return &pb.Vote{Voted: true}, nil
+		return &pb.Message{Type: VOTE, Voted: true}, nil
 	default:
 		log.Printf("voted, do not vote")
-		return &pb.Vote{Voted: false}, nil
+		return &pb.Message{Type: VOTE, Voted: false}, nil
 	}
-
 }
 
 // Voter's Handler: implementation of NEWEPOCH handler
-func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.EpochHist, error) {
+func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Message) (*pb.Message, error) {
 	if voterPaused {
 		return nil, status.Error(codes.PermissionDenied, "voter server is paused")
 	}
@@ -217,18 +232,18 @@ func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Epoch) (*pb.EpochHist
 	}
 	lastEpochProp = in.GetEpoch()
 	// acknowledge new epoch proposal
-	return &pb.EpochHist{Epoch: lastLeaderProp, Hist: pStorage}, nil
+	return &pb.Message{Type: EPOCH_HIST, Epoch: lastLeaderProp, Hist: pStorage}, nil
 }
 
 // Voter's Handler: implementation of NEWLEADER handler
-func (s *voterServer) NewLeader(ctx context.Context, in *pb.EpochHist) (*pb.Vote, error) {
+func (s *voterServer) NewLeader(ctx context.Context, in *pb.Message) (*pb.Message, error) {
 	if voterPaused {
 		return nil, status.Error(codes.PermissionDenied, "voter server is paused")
 	}
 	// check new leader's epoch
 	if in.GetEpoch() != lastEpochProp {
 		followerHolder <- false
-		return &pb.Vote{Voted: false}, nil
+		return &pb.Message{Type: VOTE, Voted: false}, nil
 	}
 	// update last leader and pStorage
 	lastLeaderProp = in.GetEpoch()
@@ -237,26 +252,26 @@ func (s *voterServer) NewLeader(ctx context.Context, in *pb.EpochHist) (*pb.Vote
 		v.E = in.GetEpoch()
 	}
 	// acknowledge NEWLEADER proposal
-	return &pb.Vote{Voted: true}, nil
+	return &pb.Message{Type: VOTE, Voted: true}, nil
 }
 
 // Voter's Handler: implementation of CommitNewLeader handler
-func (s *voterServer) CommitNewLeader(ctx context.Context, in *pb.Epoch) (*pb.Empty, error) {
+func (s *voterServer) CommitNewLeader(ctx context.Context, in *pb.Message) (*pb.Message, error) {
 	if voterPaused {
 		return nil, status.Error(codes.PermissionDenied, "voter server is paused")
 	}
 	if in.GetEpoch() != lastLeaderProp {
-		return &pb.Empty{}, nil // this is simply for prevent delayed delivery of messeges from previous leader
+		return &pb.Message{Type: EMPTY}, nil // this is simply for prevent delayed delivery of messeges from previous leader
 		// do not need to abort here, simply ignore it
 	}
 	// update dStruct
 	log.Printf("updating dStruct")
 	for _, v := range pStorage {
-		dStruct[v.Transaction.V.Key] = v.Transaction.V.Value
+		dStruct[v.T.V.Key] = v.T.V.Value
 	}
 	followerHolder <- true
 
-	return &pb.Empty{}, nil
+	return &pb.Message{Type: EMPTY}, nil
 }
 
 func Elect(port string, serial int32) string {
@@ -339,7 +354,7 @@ func Elect(port string, serial int32) string {
 					continue
 				} else if len(latestHist) == 0 { // leader has history, I have no history
 					latestHist = result.hist
-				} else if result.hist[len(result.hist)-1].E > latestHist[len(latestHist)-1].E || result.hist[len(result.hist)-1].E == latestHist[len(latestHist)-1].E && result.hist[len(result.hist)-1].Transaction.Z.Counter >= latestHist[len(latestHist)-1].Transaction.Z.Counter {
+				} else if result.hist[len(result.hist)-1].E > latestHist[len(latestHist)-1].E || result.hist[len(result.hist)-1].E == latestHist[len(latestHist)-1].E && result.hist[len(result.hist)-1].T.Z.Counter >= latestHist[len(latestHist)-1].T.Z.Counter {
 					latestHist = result.hist
 				}
 			} else {
@@ -349,7 +364,7 @@ func Elect(port string, serial int32) string {
 		if noreplyCount > nodeNum/2 {
 			log.Printf("insufficient acke, restarting election...")
 			for i := 0; i < 4; i++ {
-				synchronizationHolder <- stateHist{false, []*pb.PropTxn{{E: -1, Transaction: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}}
+				synchronizationHolder <- stateHist{false, []*pb.PropTxn{{E: -1, T: &pb.Txn{V: &pb.Vec{Key: "", Value: -1}, Z: &pb.Zxid{Epoch: -1, Counter: -1}}}}}
 			}
 			voterPauseChannel <- true
 			vs.Stop()
@@ -467,7 +482,7 @@ func newleaderHelper(port string, latestHist []*pb.PropTxn, ackldResultChannel c
 		v.E = lastEpoch
 	}
 
-	r, err := client.NewLeader(ctx, &pb.EpochHist{Epoch: lastEpoch, Hist: latestHist})
+	r, err := client.NewLeader(ctx, &pb.Message{Type: EPOCH_HIST, Epoch: lastEpoch, Hist: latestHist})
 	if err != nil {
 		// this messenger is dead
 		ackldResultChannel <- false
@@ -489,10 +504,10 @@ func commitldHelper(port string, client pb.VoterCandidateClient) bool {
 
 	// for local follower
 	for _, v := range pStorage {
-		dStruct[v.Transaction.V.Key] = v.Transaction.V.Value
+		dStruct[v.T.V.Key] = v.T.V.Value
 	}
 
-	_, err := client.CommitNewLeader(ctx, &pb.Epoch{Epoch: lastEpoch})
+	_, err := client.CommitNewLeader(ctx, &pb.Message{Type: EPOCH, Epoch: lastEpoch})
 	if err != nil {
 		log.Printf("failed to send Commit-LD to %s: %v", port, err)
 		return false
@@ -503,7 +518,7 @@ func commitldHelper(port string, client pb.VoterCandidateClient) bool {
 func askvoteHelper(port string, voteRequestResultChannel chan stateEpoch, client pb.VoterCandidateClient) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	r, err := client.AskVote(ctx, &pb.Epoch{Epoch: lastEpochProp})
+	r, err := client.AskVote(ctx, &pb.Message{Type: EPOCH, Epoch: lastEpochProp})
 	if err != nil {
 		voteRequestResultChannel <- stateEpoch{false, -1}
 		log.Printf("failed to ask vote from %s: %v", port, err)
@@ -526,7 +541,7 @@ func newepochHelper(port string, epoch int32, ackeResultChannel chan stateHist, 
 	// for local follower
 	lastEpochProp = epoch
 
-	hist, err := client.NewEpoch(ctx, &pb.Epoch{Epoch: epoch})
+	hist, err := client.NewEpoch(ctx, &pb.Message{Type: EPOCH, Epoch: epoch})
 	if err != nil {
 		// this messenger is dead
 		ackeResultChannel <- stateHist{false, nil}
@@ -553,35 +568,35 @@ func serveV(port string) {
 }
 
 // Follower's Handler: implementation of Broadcast handler
-func (s *followerServer) Broadcast(ctx context.Context, in *pb.PropTxn) (*pb.AckTxn, error) {
+func (s *followerServer) Broadcast(ctx context.Context, in *pb.Message) (*pb.Message, error) {
 	if in.GetTransaction().GetZ().Epoch != lastLeaderProp {
 		// simply for preventing delayed dilivery from old leader
-		return &pb.AckTxn{Content: "Ignore stale messeges"}, nil
+		return &pb.Message{Type: ACK_TXN, Content: "Ignore stale messeges"}, nil
 	}
 	log.Printf("Follower received proposal")
 	// writes the proposal to local stable storage
-	pStorage = append(pStorage, in)
+	pStorage = append(pStorage, &pb.PropTxn{E: in.GetEpoch(), T: in.GetTransaction()})
 	log.Printf("local stable storage: %+v", pStorage)
-	return &pb.AckTxn{Content: "I Acknowledged"}, nil
+	return &pb.Message{Type: ACK_TXN, Content: "I Acknowledged"}, nil
 }
 
 // Follower's Handler: implementation of Commit handler
-func (s *followerServer) Commit(ctx context.Context, in *pb.CommitTxn) (*pb.Empty, error) {
+func (s *followerServer) Commit(ctx context.Context, in *pb.Message) (*pb.Message, error) {
 	if in.GetEpoch() != lastLeaderProp {
 		// simply for preventing delayed delivery from old leaders
-		return &pb.Empty{Content: "prevent stale messeges"}, nil
+		return &pb.Message{Type: EMPTY}, nil
 	}
 	log.Printf("Follower received commit")
 	// writes the transaction from local stable storage to local data structure
-	dStruct[pStorage[len(pStorage)-1].Transaction.V.Key] = pStorage[len(pStorage)-1].Transaction.V.Value
+	dStruct[pStorage[len(pStorage)-1].T.V.Key] = pStorage[len(pStorage)-1].T.V.Value
 	log.Printf("local data structure: %+v", dStruct)
-	return &pb.Empty{Content: "Commit message recieved"}, nil
+	return &pb.Message{Type: EMPTY, Content: "Commit message recieved"}, nil
 }
 
 // Follower's Handler: implementation of HeartBeat handler
-func (s *followerServer) HeartBeat(ctx context.Context, in *pb.Empty) (*pb.Empty, error) {
+func (s *followerServer) HeartBeat(ctx context.Context, in *pb.Message) (*pb.Message, error) {
 	beatChannel <- 1
-	return &pb.Empty{Content: "bump"}, nil
+	return &pb.Message{Type: EMPTY}, nil
 }
 
 func Follow(port string) string {
@@ -625,7 +640,7 @@ func AckToCmtRoutine() {
 				// if quorum is already dead, it's okay to send this commit since
 				// the PropAndCmt will check this
 				for i := 0; i < nodeNum; i++ {
-					commitChannels[i] <- &pb.CommitTxn{Content: "Please commit"}
+					commitChannels[i] <- &pb.Message{Type: COMMIT_TXN}
 				}
 				return
 			default:
@@ -634,7 +649,7 @@ func AckToCmtRoutine() {
 		}
 
 		for i := 0; i < nodeNum; i++ {
-			commitChannels[i] <- &pb.CommitTxn{Content: "Please commit", Epoch: lastEpoch}
+			commitChannels[i] <- &pb.Message{Type: COMMIT_TXN, Epoch: lastEpoch}
 		}
 	}
 }
@@ -662,7 +677,7 @@ func MessengerRoutine(port string, serial int32) {
 func PropAndCmtRoutine(port string, serial int32, client pb.FollowerLeaderClient) {
 	for {
 
-		var proposal *pb.PropTxn
+		var proposal *pb.Message
 
 		select {
 		case <-universalCleanupHolder:
@@ -730,7 +745,7 @@ func BeatSendRoutine(port string, serial int32, client pb.FollowerLeaderClient) 
 		default:
 			time.Sleep(100 * time.Millisecond)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, err := client.HeartBeat(ctx, &pb.Empty{Content: "Beat"})
+			_, err := client.HeartBeat(ctx, &pb.Message{Type: EMPTY})
 			defer cancel()
 			if err != nil {
 				log.Printf("Server %s heart beat stopped: %v", port, err)

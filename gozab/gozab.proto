@@ -6,38 +6,40 @@ package gozab;
 
 // the service follower provide to leader
 service FollowerLeader {
-    rpc Broadcast (PropTxn) returns (AckTxn) {}
-    rpc Commit (CommitTxn) returns (Empty) {}
-    rpc HeartBeat (Empty) returns (Empty) {}
+    rpc Broadcast (Message) returns (Message) {}
+    rpc Commit (Message) returns (Message) {}
+    rpc HeartBeat (Message) returns (Message) {}
 }
 
 // the service leader provide to user
 service LeaderUser {
-    rpc Store (Vec) returns (Empty) {}
-    rpc Retrieve (GetTxn) returns (ResultTxn) {}
-    rpc Identify (Empty) returns (Vote) {}
+    rpc Store (Message) returns (Message) {}
+    rpc Retrieve (Message) returns (Message) {}
+    rpc Identify (Message) returns (Message) {}
 }
 
 // the service during election
 service VoterCandidate {
-    rpc AskVote (Epoch) returns (Vote) {}
-    rpc NewEpoch (Epoch) returns (EpochHist) {}
-    rpc NewLeader (EpochHist) returns (Vote) {}
-    rpc CommitNewLeader (Epoch) returns (Empty) {}
+    rpc AskVote (Message) returns (Message) {}
+    rpc NewEpoch (Message) returns (Message) {}
+    rpc NewLeader (Message) returns (Message) {}
+    rpc CommitNewLeader (Message) returns (Message) {}
 }
 
-// used as ACK_E and parameters of NEWLEADER()
-message EpochHist {
-    int32 epoch = 1;
-    repeated PropTxn hist = 2;
-}
+message Message {
 
-message Epoch {
-    int32 epoch = 1;
-}
+    int32 type = 1;
 
-message Vote {
-    bool voted = 1;
+    int32 epoch = 2;
+    repeated PropTxn hist = 3;
+    int32 counter = 4;
+    Txn transaction = 5;
+    string content = 6;
+
+    bool voted = 7;
+
+    string key = 9;
+    int32 value = 10;
 }
 
 message Vec {
@@ -57,26 +59,5 @@ message Txn {
 
 message PropTxn {
     int32 e = 1;
-    Txn transaction = 2;
-}
-
-message AckTxn {
-    string content = 1;
-}
-
-message CommitTxn {
-    string content = 1;
-    int32 epoch = 2;
-}
-
-message GetTxn {
-    string key = 1;
-}
-
-message ResultTxn {
-    int32 value = 1;
-}
-
-message Empty {
-    string content = 1;
+    Txn t = 2;
 }

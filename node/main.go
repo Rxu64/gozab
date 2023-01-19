@@ -39,8 +39,15 @@ const (
 	KEY   = 6
 	VALUE = 7
 
-	VOTE       = 8
-	EPOCH_HIST = 9
+	VOTE = 8
+
+	NEW_EPOCH = 9
+	ACK_E     = 10
+
+	NEW_LEADER = 11
+	ACK_NEW    = 12
+
+	COMMIT_NEW_LEADER = 13
 )
 
 var (
@@ -232,7 +239,7 @@ func (s *voterServer) NewEpoch(ctx context.Context, in *pb.Message) (*pb.Message
 	}
 	lastEpochProp = in.GetEpoch()
 	// acknowledge new epoch proposal
-	return &pb.Message{Type: EPOCH_HIST, Epoch: lastLeaderProp, Hist: pStorage}, nil
+	return &pb.Message{Type: ACK_E, Epoch: lastLeaderProp, Hist: pStorage}, nil
 }
 
 // Voter's Handler: implementation of NEWLEADER handler
@@ -243,7 +250,7 @@ func (s *voterServer) NewLeader(ctx context.Context, in *pb.Message) (*pb.Messag
 	// check new leader's epoch
 	if in.GetEpoch() != lastEpochProp {
 		followerHolder <- false
-		return &pb.Message{Type: VOTE, Voted: false}, nil
+		return &pb.Message{Type: ACK_NEW, Voted: false}, nil
 	}
 	// update last leader and pStorage
 	lastLeaderProp = in.GetEpoch()
@@ -252,7 +259,7 @@ func (s *voterServer) NewLeader(ctx context.Context, in *pb.Message) (*pb.Messag
 		v.E = in.GetEpoch()
 	}
 	// acknowledge NEWLEADER proposal
-	return &pb.Message{Type: VOTE, Voted: true}, nil
+	return &pb.Message{Type: ACK_NEW, Voted: true}, nil
 }
 
 // Voter's Handler: implementation of CommitNewLeader handler
@@ -482,7 +489,7 @@ func newleaderHelper(port string, latestHist []*pb.PropTxn, ackldResultChannel c
 		v.E = lastEpoch
 	}
 
-	r, err := client.NewLeader(ctx, &pb.Message{Type: EPOCH_HIST, Epoch: lastEpoch, Hist: latestHist})
+	r, err := client.NewLeader(ctx, &pb.Message{Type: NEW_LEADER, Epoch: lastEpoch, Hist: latestHist})
 	if err != nil {
 		// this messenger is dead
 		ackldResultChannel <- false
@@ -507,7 +514,7 @@ func commitldHelper(port string, client pb.VoterCandidateClient) bool {
 		dStruct[v.T.V.Key] = v.T.V.Value
 	}
 
-	_, err := client.CommitNewLeader(ctx, &pb.Message{Type: EPOCH, Epoch: lastEpoch})
+	_, err := client.CommitNewLeader(ctx, &pb.Message{Type: COMMIT_NEW_LEADER, Epoch: lastEpoch})
 	if err != nil {
 		log.Printf("failed to send Commit-LD to %s: %v", port, err)
 		return false
@@ -541,7 +548,7 @@ func newepochHelper(port string, epoch int32, ackeResultChannel chan stateHist, 
 	// for local follower
 	lastEpochProp = epoch
 
-	hist, err := client.NewEpoch(ctx, &pb.Message{Type: EPOCH, Epoch: epoch})
+	hist, err := client.NewEpoch(ctx, &pb.Message{Type: NEW_EPOCH, Epoch: epoch})
 	if err != nil {
 		// this messenger is dead
 		ackeResultChannel <- stateHist{false, nil}

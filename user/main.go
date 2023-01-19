@@ -24,8 +24,15 @@ const (
 	KEY   = 6
 	VALUE = 7
 
-	VOTE       = 8
-	EPOCH_HIST = 9
+	VOTE = 8
+
+	NEW_EPOCH = 9
+	ACK_E     = 10
+
+	NEW_LEADER = 11
+	ACK_NEW    = 12
+
+	COMMIT_NEW_LEADER = 13
 )
 
 var (
@@ -90,7 +97,7 @@ func connectionRoutine(serial int, found chan int, lost chan int) {
 			} else if command == "Get" {
 				fmt.Printf("Enter a key: ")
 				fmt.Scanf("%s", &key)
-				r, err := c.Retrieve(context.Background(), &pb.Message{Key: key})
+				r, err := c.Retrieve(context.Background(), &pb.Message{Type: KEY, Key: key})
 				if err != nil {
 					log.Printf("could not send Get request to leader, try again: %v", err)
 					lost <- 1

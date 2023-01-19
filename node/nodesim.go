@@ -21,13 +21,30 @@ type State struct {
 	proposals []*pb.PropTxn
 }
 
-func Apply(s State, msg *pb.Message) {
-
+func Apply(s State, msg *pb.Message) (State, *pb.Message) {
+	reply := &pb.Message{}
+	switch msg.Type {
+	case VEC:
+		s.StoreTransformation(msg)
+	case ACK_TXN:
+		s.AckTransformation(msg)
+	case PROP_TXN:
+		s.BroadcastTransformation(msg)
+	case COMMIT_TXN:
+		s.CommitTransformation(msg)
+	case NEW_EPOCH:
+		s.NewEpochTransformation(msg)
+	case NEW_LEADER:
+		s.NewLeaderTransformation(msg)
+	case COMMIT_NEW_LEADER:
+		s.CommitNewLeaderTransformation(msg)
+	}
+	return s, reply
 }
 
 // LEADER receive from client
-func (s *State) StoreTransformation(msg *pb.Vec) {
-	s.proposals = append(s.proposals, &pb.PropTxn{E: s.lastEpoch, T: &pb.Txn{V: msg, Z: &pb.Zxid{Epoch: s.lastEpoch, Counter: -1}}})
+func (s *State) StoreTransformation(msg *pb.Message) {
+	s.proposals = append(s.proposals, &pb.PropTxn{E: s.lastEpoch, T: &pb.Txn{V: &pb.Vec{Key: msg.Key, Value: msg.Value}, Z: &pb.Zxid{Epoch: s.lastEpoch, Counter: -1}}})
 }
 
 // LEADER receive from follower
@@ -38,9 +55,9 @@ func (s *State) AckTransformation(msg *pb.Message) {
 }
 
 // FOLLOWER receive from leader
-func (s *State) BroadcastTransformation(msg *pb.PropTxn) {
-	if s.lastLeaderProp == msg.E {
-		s.pStorage = append(s.pStorage, msg)
+func (s *State) BroadcastTransformation(msg *pb.Message) {
+	if s.lastLeaderProp == msg.Epoch {
+		s.pStorage = append(s.pStorage, &pb.PropTxn{E: msg.Epoch, T: msg.Transaction})
 	}
 }
 
